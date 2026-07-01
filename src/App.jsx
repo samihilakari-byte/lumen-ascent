@@ -2718,9 +2718,10 @@ export default function App(){
     {!onboarded&&<OnboardingView dark={dark} t={t} CATS={CATS} onLang={(l)=>{setLang(l);localStorage.setItem("perma_lang",l);}} onComplete={(name)=>{localStorage.setItem("lumen_onboarded","1");if(name){localStorage.setItem("lumen_name",name);setUserName(name);}setOnboarded(true);setTab("home");}}/>}
     {onboarded&&showDailyWelcome&&<DailyWelcomeView dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onContinue={()=>{localStorage.setItem("lumen_last_welcome",new Date().toDateString());setShowDailyWelcome(false);setTab("home");}}/>}
     {showCrisis&&<CrisisModal dark={dark} t={t} onClose={()=>setShowCrisis(false)}/>}
-    <Sidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} tab={tab} setTab={setTab} dark={dark} streak={streak} t={t}/>
+    {onboarded&&!showDailyWelcome&&<>
+<Sidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} tab={tab} setTab={setTabAnimated} dark={dark} streak={streak} t={t}/>
 
-    {/* Header + content only shown after onboarding and daily welcome */}
+    </>}{/* Header + content only shown after onboarding and daily welcome */}
     {onboarded&&!showDailyWelcome&&<>
     {/* Header — swipe here to change tabs */}
     <div className="fixed top-0 left-0 right-0 z-30" style={{background:headerBg,backdropFilter:"blur(14px)",borderBottom:`1px solid ${border}`}}
