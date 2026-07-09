@@ -26,7 +26,7 @@ const T = {
     tagMsg:(label,w,wo)=>`Kalenterin ${label}-päivinä arvosanasi on ${w} vs. muina päivinä ${wo}.`,
     tagPositive:" Tämä tukee hyvinvointiasi! 🌟", tagNeutral:" Huomionarvoinen havainto.",
     noTagData:"Lisää PERMA+4-tageja kalenteritapahtumiin, niin korrelaatiot näkyvät tässä.",
-    reminderTitle:"Päivittäinen muistutus", reminderSub:"Muistuttaa täyttämään päiväkirjan",
+    reminderTitle:"Päivittäinen muistutus", reminderSub:"Muistuttaa täyttämään päiväkirjan. Jos olet jo kirjoittanut, muistutus ohitetaan automaattisesti.",
     reminderTime:"MUISTUTUSAIKA", reminderSave:"Tallenna asetukset",
     permDenied:"Ilmoituslupa on estetty. Salli se selaimesi asetuksista.",
     permDefault:"Ilmoituslupa tarvitaan muistutuksia varten.",
@@ -47,6 +47,7 @@ const T = {
     libraryEmptySub:"Tallenna tapahtuma mallipohjaksi — löydät sen täältä ensi kerralla.",
     libraryUse:"Käytä",
     sectionAppearance:"ULKOASU", sectionReminders:"MUISTUTUKSET", sectionData:"DATA",
+    weekNumSetting:"Viikkonumerot kalenterissa", weekNumSettingSub:"Näyttää viikkonumerot kuukausinäkymässä",
     themeLabel:(d)=>d?"Tumma tila":"Vaalea tila", themeSub:(d)=>d?"Dark mode":"Light mode",
     savedSettings:"✓ Tallennettu!", diaryEntries:"päiväkirjamerkintää", eventsCount:"tapahtumaa",
     inAppReminder:"Muistutus aktivoitu sovelluksessa",
@@ -160,7 +161,7 @@ const T = {
     tagMsg:(label,w,wo)=>`On ${label} days your score is ${w} vs. other days ${wo}.`,
     tagPositive:" This supports your wellbeing! 🌟", tagNeutral:" Noteworthy observation.",
     noTagData:"Add PERMA+4 tags to calendar events and correlations will appear here.",
-    reminderTitle:"Daily reminder", reminderSub:"Reminds you to fill in the journal",
+    reminderTitle:"Daily reminder", reminderSub:"Reminds you to write in your journal. If you have already written, the reminder is automatically skipped.",
     reminderTime:"REMINDER TIME", reminderSave:"Save settings",
     permDenied:"Notification permission denied. Allow it in your browser settings.",
     permDefault:"Notification permission is needed for reminders.",
@@ -181,6 +182,7 @@ const T = {
     libraryEmptySub:"Save an event as a template — find it here next time.",
     libraryUse:"Use",
     sectionAppearance:"APPEARANCE", sectionReminders:"REMINDERS", sectionData:"DATA",
+    weekNumSetting:"Week numbers in calendar", weekNumSettingSub:"Shows week numbers in month view",
     themeLabel:(d)=>d?"Dark mode":"Light mode", themeSub:(d)=>d?"Dark":"Light",
     savedSettings:"✓ Saved!", diaryEntries:"journal entries", eventsCount:"events",
     inAppReminder:"Reminder activated in app",
@@ -312,12 +314,24 @@ const STORE_KEY="permaapp_v6";
 const load=()=>{try{return JSON.parse(localStorage.getItem(STORE_KEY)||"{}");}catch{return{};}};
 const save=(d)=>{try{localStorage.setItem(STORE_KEY,JSON.stringify(d));}catch{}};
 
-const scheduleNotif=(hour,minute,t)=>{
+const scheduleNotif=(hour,minute,t,getData)=>{
   const fire=()=>{
     const now=new Date(),next=new Date();
     next.setHours(hour,minute,0,0);
     if(next<=now)next.setDate(next.getDate()+1);
-    return setTimeout(()=>{if(Notification.permission==="granted")new Notification(t.reminderNotifTitle,{body:t.reminderNotifBody});fire();},next-now);
+    return setTimeout(()=>{
+      if(typeof Notification !== "undefined" && Notification.permission==="granted"){
+        // Check if diary already filled today
+        const today=toDateStr(new Date());
+        const data=getData();
+        const todayEntry=data.diary?.[today];
+        const alreadyDone=!!(todayEntry?.text?.trim()||Object.keys(todayEntry?.scores||{}).length>0);
+        if(!alreadyDone){
+          new Notification(t.reminderNotifTitle,{body:t.reminderNotifBody});
+        }
+      }
+      fire();
+    },next-now);
   };
   return fire();
 };
@@ -422,13 +436,14 @@ function TooltipTag({cat, dark}) {
   const [show, setShow] = useState(false);
 
   const open = () => {
-    // Close previously open tooltip
     if (_tooltipState.setter && _tooltipState.current !== cat.id) {
       _tooltipState.setter(false);
     }
     _tooltipState.current = cat.id;
     _tooltipState.setter = setShow;
     setShow(true);
+    // Auto-close after 2 seconds on mobile
+    setTimeout(()=>{ if(_tooltipState.current===cat.id){ setShow(false); _tooltipState.current=null; _tooltipState.setter=null; } }, 2000);
   };
 
   const close = () => {
@@ -492,11 +507,10 @@ function TagPill({cat,selected,onToggle,dark,showInfoIcons,t}){
 
 // ── Wheel Column (shared by DatePicker & TimePicker) ─────────────────────────
 function WheelCol({items, value, onChange, dark, width="flex-1"}) {
-  const ITEM_H = 40;
+  const ITEM_H = 32;
   const REPEATS = 5;
   const ref = useRef(null);
   const isScrolling = useRef(false);
-  const initialized = useRef(false);
 
   const getIdx = (val) => {
     const i = items.findIndex(x => String(x.val) === String(val));
@@ -505,34 +519,20 @@ function WheelCol({items, value, onChange, dark, width="flex-1"}) {
 
   const [selIdx, setSelIdx] = useState(() => getIdx(value));
 
-  const doScroll = (idx) => {
-    if (!ref.current) return false;
-    ref.current.scrollTop = idx * ITEM_H;
-    return Math.abs(ref.current.scrollTop - idx * ITEM_H) < 2;
-  };
-
-  // Retry scroll until element is visible and scroll works
-  const ensureScroll = (idx) => {
-    if (doScroll(idx)) return;
-    let tries = 0;
-    const t = setInterval(() => {
-      if (doScroll(idx) || ++tries > 20) clearInterval(t);
-    }, 30);
-  };
-
+  // Scroll to position — runs on mount and when value changes
   useEffect(() => {
     const idx = getIdx(value);
     setSelIdx(idx);
-    ensureScroll(idx);
+    if (ref.current) ref.current.scrollTop = idx * ITEM_H;
   }, [value]);
 
-  // Also try on every render in case display changed from none to block
+  // On mount scroll
   useEffect(() => {
-    if (!initialized.current) {
-      ensureScroll(selIdx);
-      initialized.current = true;
-    }
-  });
+    const idx = getIdx(value);
+    requestAnimationFrame(() => {
+      if (ref.current) ref.current.scrollTop = idx * ITEM_H;
+    });
+  }, []);
 
   const onScroll = () => {
     if (!ref.current) return;
@@ -560,37 +560,38 @@ function WheelCol({items, value, onChange, dark, width="flex-1"}) {
   const selBorder = dark ? "#3B82F650" : "#3B82F640";
 
   return (
-    <div className={width} style={{position:"relative", height:ITEM_H*5, overflow:"hidden"}}>
-      <div style={{position:"absolute", top:ITEM_H*2, left:4, right:4,
+    <div className={width} style={{position:"relative", height:ITEM_H*3, overflow:"hidden"}}>
+      <div style={{position:"absolute", top:ITEM_H*1, left:4, right:4,
         height:ITEM_H, background:selBg, borderRadius:8,
         border:`1px solid ${selBorder}`, pointerEvents:"none", zIndex:1}}/>
-      <div style={{position:"absolute", top:0, left:0, right:0, height:ITEM_H*1.5,
+      <div style={{position:"absolute", top:0, left:0, right:0, height:ITEM_H*0.8,
         background:`linear-gradient(to bottom,${bg},${bg}cc,transparent)`,
         pointerEvents:"none", zIndex:3}}/>
-      <div style={{position:"absolute", bottom:0, left:0, right:0, height:ITEM_H*1.5,
+      <div style={{position:"absolute", bottom:0, left:0, right:0, height:ITEM_H*0.8,
         background:`linear-gradient(to top,${bg},${bg}cc,transparent)`,
         pointerEvents:"none", zIndex:3}}/>
       <div ref={ref} onScroll={onScroll} style={{
         position:"absolute", top:0, left:0, right:0, bottom:0,
         overflowY:"scroll", overflowX:"hidden",
         scrollbarWidth:"none", WebkitOverflowScrolling:"touch",
-        paddingTop:ITEM_H*2, paddingBottom:ITEM_H*2,
       }}>
+        <div style={{height:ITEM_H*1}}/>
         {allItems.map(item => {
           const isSel = item._abs === selIdx;
           return (
             <div key={item._key}
-              onClick={() => { setSelIdx(item._abs); doScroll(item._abs); onChange(item.val); }}
+              onClick={() => { setSelIdx(item._abs); if(ref.current) ref.current.scrollTop=item._abs*ITEM_H; onChange(item.val); }}
               style={{
                 height:ITEM_H, display:"flex", alignItems:"center", justifyContent:"center",
                 fontSize: isSel?16:14, fontWeight: isSel?700:400,
                 color: isSel?text:muted,
-                cursor:"pointer", userSelect:"none", position:"relative", zIndex:2,
+                cursor:"pointer", userSelect:"none", flexShrink:0, position:"relative", zIndex:2,
               }}>
               {item.label}
             </div>
           );
         })}
+        <div style={{height:ITEM_H*1}}/>
       </div>
     </div>
   );
@@ -619,7 +620,7 @@ function DatePicker({value, onChange, dark}) {
   const border = dark ? "#2D3F55" : "#E2E8F0";
 
   return (
-    <div className="mb-3 rounded-xl overflow-hidden" style={{background:bg, border:`1px solid ${border}`}}>
+    <div className="mb-3 rounded-xl overflow-hidden" style={{isolation:"isolate"}} style={{background:bg, border:`1px solid ${border}`}}>
       <div className="flex gap-0" style={{padding:"0 4px"}}>
         <WheelCol items={dayItems} value={day} onChange={v=>update(year,month,v)} dark={dark} width="w-16"/>
         <WheelCol items={monthItems} value={month} onChange={v=>update(year,v,day)} dark={dark} width="flex-1"/>
@@ -645,7 +646,7 @@ function TimePicker({value, onChange, dark, label, muted}) {
   return (
     <div className="flex-1">
       {label && <div className="text-xs mb-1 font-medium" style={{color:muted}}>{label}</div>}
-      <div className="rounded-xl overflow-hidden" style={{background:bg, border:`1px solid ${border}`}}>
+      <div className="rounded-xl overflow-hidden" style={{isolation:"isolate"}} style={{background:bg, border:`1px solid ${border}`}}>
         <div className="flex items-center" style={{padding:"0 4px"}}>
           <WheelCol items={hourItems} value={hour} onChange={v=>onChange(`${String(v).padStart(2,"0")}:${String(minute).padStart(2,"0")}`)} dark={dark}/>
           <div style={{color:text,fontWeight:700,fontSize:16,padding:"0 2px"}}>:</div>
@@ -685,18 +686,19 @@ function EventModal({ev,onSave,onDelete,onClose,dark,t,CATS,templates,onSaveTemp
       repeat:repeat||"none",
       id:(ev&&ev.id)?ev.id:Date.now().toString()
     };
-    if(saveAsTemplate)onSaveTemplate({id:Date.now().toString(),...evData});
+    // Auto-save to library
+    onSaveTemplate({id:evData.title.toLowerCase().replace(/ /g,"-")+"-tmpl",...evData});
     onSave(evData);
     onClose();
   };
-  if(showLibrary)return(<div className="fixed inset-0 z-50 flex items-end justify-center" style={{background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)"}} onClick={()=>setShowLibrary(false)}>
-    <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"80vh"}} onClick={e=>e.stopPropagation()}>
+  if(showLibrary)return(<div className="fixed z-[100] flex items-end justify-center" style={{inset:0,background:"rgba(0,0,0,0.95)"}} onClick={()=>setShowLibrary(false)}>
+    <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"calc(100vh - var(--header-h,56px) - 3.5rem)",boxShadow:"0 -4px 40px rgba(0,0,0,0.5)"}} onClick={e=>e.stopPropagation()}>
       <div className="px-5 pt-5 pb-3 flex items-center justify-between sticky top-0 z-10" style={{background:card}}>
         <button type="button" onClick={()=>setShowLibrary(false)} className="flex items-center gap-1 text-sm font-semibold" style={{color:"#3B82F6"}}>‹ {t.newEvent}</button>
         <h3 className="font-bold text-sm" style={{color:text}}>📚 {t.library}</h3>
         <button type="button" onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{background:dark?"#1E2A3B":"#F1F5F9",color:muted}}>×</button>
       </div>
-      <div className="px-5 pb-8">
+      <div className="px-5" style={{paddingBottom:"1.5rem"}}>
         {templates.length===0?(<div className="text-center py-10 rounded-2xl" style={{background:dark?"#1E2A3B":"#F8FAFC",border:`1px solid ${border}`}}><div className="text-4xl mb-3">📂</div><p className="text-sm font-semibold mb-1" style={{color:text}}>{t.libraryEmpty}</p><p className="text-xs px-4" style={{color:muted}}>{t.libraryEmptySub}</p></div>)
         :templates.map(tmpl=>(<div key={tmpl.id} className="flex items-start gap-2 p-3.5 rounded-2xl mb-2.5" style={{background:dark?"#1E2A3B":"#F8FAFC",border:`1px solid ${border}`}}>
           <div className="flex-1 min-w-0"><div className="text-sm font-bold mb-1.5" style={{color:text}}>{tmpl.title}</div>
@@ -711,19 +713,24 @@ function EventModal({ev,onSave,onDelete,onClose,dark,t,CATS,templates,onSaveTemp
     </div>
   </div>);
 
-  return(<div className="fixed inset-0 z-50 flex items-end justify-center" style={{background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)"}} onClick={onClose}>
-    <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"92vh"}} onClick={e=>e.stopPropagation()}>
-      <div className="px-5 pt-5 pb-2 flex items-center justify-between sticky top-0 z-10" style={{background:card}}>
+  return(<div className="fixed z-[100] flex items-end justify-center" style={{inset:0,background:"rgba(0,0,0,0.95)"}} onClick={onClose}>
+    <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"calc(100vh - var(--header-h,56px) - 3.5rem)",boxShadow:"0 -4px 40px rgba(0,0,0,0.5)"}} onClick={e=>e.stopPropagation()}>
+      <div className="px-5 pt-4 pb-2 flex items-center justify-between" style={{background:card,borderRadius:"1.5rem 1.5rem 0 0"}}>
         <h3 className="font-bold text-base" style={{color:text}}>{ev?.id?t.editEvent:t.newEvent}</h3>
         <div className="flex items-center gap-2">
-          {!ev?.id&&<button type="button" onClick={()=>setShowLibrary(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold" style={{background:templates.length>0?"#3B82F618":dark?"#1E2A3B":"#F1F5F9",border:`1px solid ${templates.length>0?"#3B82F640":border}`,color:templates.length>0?"#3B82F6":muted}}>
-            📚 {t.library}{templates.length>0&&<span className="w-4 h-4 rounded-full flex items-center justify-center text-xs font-black" style={{background:"#3B82F6",color:"#fff"}}>{templates.length}</span>}
-          </button>}
           <button type="button" onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{background:dark?"#1E2A3B":"#F1F5F9",color:muted}}>×</button>
         </div>
       </div>
-      <div className="px-5 pb-8">
-        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder={t.eventName} className="w-full px-4 py-3 rounded-xl text-sm mb-3 outline-none" style={{background:bg,border:`1px solid ${border}`,color:text}}/>
+      <div className="px-5" style={{paddingBottom:"6rem"}}>
+        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder={t.eventName}
+          onFocus={e=>setTimeout(()=>e.target.scrollIntoView({behavior:"smooth",block:"nearest"}),300)}
+          className="w-full px-4 py-3 rounded-xl text-sm mb-3 outline-none" style={{background:bg,border:`1px solid ${border}`,color:text}}/>
+        {!ev?.id&&<button type="button" onClick={()=>setShowLibrary(true)}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold mb-3"
+          style={{background:dark?"#1E2A3B":"#F1F5F9",color:"#3B82F6",border:"1px solid #3B82F630"}}>
+          📚 {t.library}
+          {templates.length>0&&<span className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-black" style={{background:"#3B82F6",color:"#fff"}}>{templates.length}</span>}
+        </button>}
         <DiaryDatePicker selDate={date} onSelect={setDate} dark={dark} t={t} diary={{}} onSearch={()=>{}} showSearch={false}/>
         <div className="flex items-center gap-2 mb-3">
           <TimePicker value={time} onChange={setTime} dark={dark} label={t.starts} muted={muted}/>
@@ -738,10 +745,7 @@ function EventModal({ev,onSave,onDelete,onClose,dark,t,CATS,templates,onSaveTemp
         <div className="flex flex-wrap gap-2 mb-3">{CATS.filter(c=>c.section==="PERMA").map(c=><TagPill key={c.id} cat={c} selected={tags.includes(c.id)} onToggle={toggle} dark={dark} showInfoIcons={showInfoIcons} t={t}/>)}</div>
         <p className="text-xs mb-2 font-medium" style={{color:muted}}>+4</p>
         <div className="flex flex-wrap gap-2 mb-4">{CATS.filter(c=>c.section==="+4").map(c=><TagPill key={c.id} cat={c} selected={tags.includes(c.id)} onToggle={toggle} dark={dark} showInfoIcons={showInfoIcons} t={t}/>)}</div>
-        {!ev?.id&&<button type="button" onClick={()=>setSaveAsTemplate(s=>!s)} className="w-full flex items-center gap-3 p-3 rounded-xl mb-4" style={{background:saveAsTemplate?"#3B82F615":dark?"#1E2A3B":"#F8FAFC",border:`1px solid ${saveAsTemplate?"#3B82F640":border}`}}>
-          <div className="w-5 h-5 rounded flex items-center justify-center" style={{background:saveAsTemplate?"#3B82F6":"transparent",border:`1.5px solid ${saveAsTemplate?"#3B82F6":muted}`}}>{saveAsTemplate&&<span className="text-xs" style={{color:"#fff"}}>✓</span>}</div>
-          <span className="text-sm" style={{color:saveAsTemplate?"#3B82F6":muted}}>📚 {t.librarySave}</span>
-        </button>}
+
         <div className="flex gap-2">
           {ev?.id&&<button type="button" onClick={()=>{onDelete(ev.id);onClose();}} className="px-4 py-3 rounded-2xl text-sm font-medium" style={{background:"#EF444418",color:"#EF4444",border:"1px solid #EF444430"}}>{t.delete}</button>}
           <button type="button" onClick={handleSave} className="flex-1 py-3 rounded-2xl text-sm font-bold" style={{background:"#3B82F6",color:"#fff"}}>{t.save}</button>
@@ -785,20 +789,88 @@ function TrendChart({diary,CATS,dark,t,showInfoIcons}){
   </div>);
 }
 
-function BestWeekCard({diary,CATS,dark,t}){
+function BestWeekCard({diary,events,CATS,dark,t,lang,onNavigate}){
   const dates=Object.keys(diary).sort();
   if(dates.length<7)return null;
   const weeks={};
-  dates.forEach(d=>{const wk=getWeekMonday(d);if(!weeks[wk])weeks[wk]={scores:[],cats:{}};const sc=diary[d]?.scores||{};weeks[wk].scores.push(CATS.map(c=>sc[c.id]||5).reduce((a,b)=>a+b,0)/CATS.length);CATS.forEach(c=>{weeks[wk].cats[c.id]=(weeks[wk].cats[c.id]||0)+(sc[c.id]||5);});});
-  const wa=Object.entries(weeks).map(([wk,v])=>({wk,avg:v.scores.reduce((a,b)=>a+b,0)/v.scores.length,cats:v.cats,days:v.scores.length})).filter(w=>w.days>=3);
+  dates.forEach(d=>{
+    const wk=getWeekMonday(d);
+    if(!weeks[wk])weeks[wk]={scores:[],cats:{},diaryDays:0};
+    const sc=diary[d]?.scores||{};
+    weeks[wk].scores.push(CATS.map(c=>sc[c.id]||5).reduce((a,b)=>a+b,0)/CATS.length);
+    CATS.forEach(c=>{weeks[wk].cats[c.id]=(weeks[wk].cats[c.id]||0)+(sc[c.id]||5);});
+    if(diary[d]?.text) weeks[wk].diaryDays++;
+  });
+  const wa=Object.entries(weeks).map(([wk,v])=>({wk,avg:v.scores.reduce((a,b)=>a+b,0)/v.scores.length,cats:v.cats,days:v.scores.length,diaryDays:v.diaryDays})).filter(w=>w.days>=3);
   if(!wa.length)return null;
   const best=wa.reduce((a,b)=>a.avg>b.avg?a:b);
   const bestCat=CATS.find(c=>c.id===Object.entries(best.cats).sort((a,b)=>b[1]-a[1])[0]?.[0]);
-  const border=dark?"#2D3F55":"#E8EEF4",text=dark?"#E2E8F0":"#1E293B",muted="#94A3B8";
-  return(<div className="rounded-2xl p-4 mb-4" style={{background:dark?"linear-gradient(135deg,#1E2A3B,#162032)":"linear-gradient(135deg,#F0FDF4,#EFF6FF)",border:`1px solid ${bestCat?.color||"#10B981"}30`}}>
-    <p className="text-xs font-bold tracking-wider mb-3" style={{color:muted}}>{t.bestWeek}</p>
-    <div className="flex items-start gap-3"><div className="text-3xl">{bestCat?.emoji||"🌟"}</div><p className="text-sm leading-relaxed" style={{color:text}}>{t.bestWeekMsg(getWeekNumber(best.wk),best.avg.toFixed(1),bestCat?.label||"")}</p></div>
-  </div>);
+  const top3=Object.entries(best.cats).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([id])=>CATS.find(c=>c.id===id)).filter(Boolean);
+
+  // Count events that week
+  const weekEnd=addDays(best.wk,6);
+  const weekEvCount=Object.values(events||{}).filter(ev=>ev.date>=best.wk&&ev.date<=weekEnd).length;
+
+  const card=dark?"#1A2332":"#ffffff";
+  const border=dark?"#2D3F55":"#E8EEF4";
+  const text=dark?"#E2E8F0":"#1E293B";
+  const muted="#94A3B8";
+  const color=bestCat?.color||"#10B981";
+
+  return(
+    <button type="button" onClick={()=>onNavigate&&onNavigate(best.wk)}
+      className="w-full rounded-2xl p-4 mb-4 text-left"
+      style={{background:dark?"linear-gradient(135deg,#1E2A3B,#162032)":"linear-gradient(135deg,#F0FDF4,#EFF6FF)",
+        border:`1px solid ${color}30`}}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-bold tracking-wider" style={{color:muted}}>{t.bestWeek}</p>
+        <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+          style={{background:color+"20",color}}>{lang==="fi"?"Viikko":"Week"} {getWeekNumber(best.wk)}</span>
+      </div>
+
+      {/* Message */}
+      <div className="flex items-start gap-3 mb-3">
+        <div className="text-2xl shrink-0">{bestCat?.emoji||"🌟"}</div>
+        <p className="text-sm leading-relaxed" style={{color:text}}>
+          {t.bestWeekMsg(getWeekNumber(best.wk),best.avg.toFixed(1),bestCat?.label||"")}
+        </p>
+      </div>
+
+      {/* Summary */}
+      <div className="flex gap-3 mb-3">
+        <div className="flex-1 rounded-xl p-2.5 text-center" style={{background:dark?"rgba(0,0,0,0.2)":"rgba(255,255,255,0.7)"}}>
+          <div className="text-lg font-black" style={{color}}>{best.days}</div>
+          <div className="text-xs" style={{color:muted}}>{lang==="fi"?"päivää":"days"}</div>
+        </div>
+        {best.diaryDays>0&&<div className="flex-1 rounded-xl p-2.5 text-center" style={{background:dark?"rgba(0,0,0,0.2)":"rgba(255,255,255,0.7)"}}>
+          <div className="text-lg font-black" style={{color:"#10B981"}}>{best.diaryDays}</div>
+          <div className="text-xs" style={{color:muted}}>{lang==="fi"?"merkintää":"entries"}</div>
+        </div>}
+        {weekEvCount>0&&<div className="flex-1 rounded-xl p-2.5 text-center" style={{background:dark?"rgba(0,0,0,0.2)":"rgba(255,255,255,0.7)"}}>
+          <div className="text-lg font-black" style={{color:"#8B5CF6"}}>{weekEvCount}</div>
+          <div className="text-xs" style={{color:muted}}>{lang==="fi"?"tapahtumaa":"events"}</div>
+        </div>}
+      </div>
+
+      {/* Top categories with scores */}
+      <div className="flex gap-1.5 flex-wrap mb-3">
+        {top3.map(c=>{
+          const avg=(best.cats[c.id]||0)/best.days;
+          return(
+            <span key={c.id} className="text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1"
+              style={{background:c.color+"20",color:c.color}}>
+              {c.emoji} {c.label} <span style={{opacity:0.8}}>{avg.toFixed(1)}</span>
+            </span>
+          );
+        })}
+      </div>
+
+      {/* CTA */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-semibold" style={{color}}>{lang==="fi"?"Avaa viikko kalenterissa →":"Open week in calendar →"}</span>
+      </div>
+    </button>
+  );
 }
 
 // ── Calendar swipe hook (for calendar area only) ──────────────────────────────
@@ -818,7 +890,7 @@ function useCalSwipe(onLeft, onRight) {
 }
 
 // ── Week View ─────────────────────────────────────────────────────────────────
-function WeekView({data,onData,dark,onOpenEvent,onOpenFull,t,CATS}){
+function WeekView({data,onData,dark,onOpenEvent,onOpenFull,t,CATS,lang,timeGrid=true,jumpToDay,onJumped}){
   const [weekStart,setWeekStart]=useState(()=>getWeekMonday(todayStr()));
   const events=data.events||{},diary=data.diary||{},today=todayStr();
   const days=Array.from({length:7},(_,i)=>addDays(weekStart,i));
@@ -833,59 +905,161 @@ function WeekView({data,onData,dark,onOpenEvent,onOpenFull,t,CATS}){
   const weekLabel=()=>{const s=new Date(weekStart),e=new Date(addDays(weekStart,6));return s.getMonth()===e.getMonth()?`${s.getDate()}–${e.getDate()}. ${t.monthsShort[s.getMonth()]} ${s.getFullYear()}`:`${s.getDate()}. ${t.monthsShort[s.getMonth()]} – ${e.getDate()}. ${t.monthsShort[e.getMonth()]}`;};
   const allEvents=()=>{const evs=[];Object.values(events).forEach(ev=>{days.forEach(ds=>{if(ev.repeat==="daily"){evs.push({...ev,date:ds,id:ev.id+"_"+ds});}else if(ev.repeat==="weekly"&&new Date(ev.date).getDay()===new Date(ds).getDay()){evs.push({...ev,date:ds,id:ev.id+"_"+ds});}else if(ev.date===ds){evs.push(ev);}});});return evs;};
 
-  return(<div>
-    <div className="flex items-center justify-between mb-3">
-      <button onClick={()=>setWeekStart(s=>addDays(s,-7))} className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:sub,color:muted}}>‹</button>
-      <span className="text-sm font-bold" style={{color:text}}>{weekLabel()}</span>
-      <button onClick={()=>setWeekStart(s=>addDays(s,7))} className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:sub,color:muted}}>›</button>
-    </div>
-    <button onClick={()=>setWeekStart(getWeekMonday(today))} className="w-full py-2 rounded-xl text-xs font-semibold mb-3" style={{background:"#3B82F615",color:"#3B82F6",border:"1px solid #3B82F630"}}>{t.today}</button>
+  const [selDay, setSelDay] = useState(today);
+  const timeGridRef = useRef(null);
 
-    {/* Week day grid — same size as month view cells */}
-    <div className="grid grid-cols-7 mb-1">{t.weekdays.map(d=><div key={d} className="text-center text-xs py-1 font-semibold" style={{color:muted}}>{d}</div>)}</div>
-    <div className="grid grid-cols-7 gap-0.5 mb-4" {...calSwipe}>
-      {days.map((ds,i)=>{
-        const d=new Date(ds),isToday=ds===today;
-        const dayEvs=allEvents().filter(e=>e.date===ds);
-        const allTags=[...new Set(dayEvs.flatMap(e=>e.tags||[]))];
-        return(<button key={ds} onClick={()=>onOpenEvent(ds)}
-          className="rounded-xl p-1 min-h-14 flex flex-col items-center transition-all"
-          style={{background:isToday?"#3B82F620":sub,border:`1.5px solid ${isToday?"#3B82F6":border}`}}>
-          <span className="text-xs font-bold mb-0.5" style={{color:isToday?"#3B82F6":text}}>{d.getDate()}</span>
-          {diary[ds]&&<div className="w-1.5 h-1.5 rounded-full mb-0.5" style={{background:"#10B981"}}/>}
-          <div className="flex flex-wrap justify-center gap-0.5">{allTags.slice(0,3).map(id=>{const c=CATS.find(x=>x.id===id);return c?<div key={id} className="w-1.5 h-1.5 rounded-full" style={{background:c.color}}/>:null;})}</div>
-          {dayEvs.length>0&&<span style={{color:muted,fontSize:"0.55rem"}}>{dayEvs.length>1?`${dayEvs.length}×`:"·"}</span>}
-        </button>);
-      })}
+  // Handle jump from month view
+  useEffect(()=>{
+    if(jumpToDay){
+      setSelDay(jumpToDay);
+      setWeekStart(getWeekMonday(jumpToDay));
+      if(onJumped) onJumped();
+    }
+  },[jumpToDay]);
+
+  useEffect(()=>{
+    if(timeGridRef.current){
+      const h=new Date().getHours();
+      timeGridRef.current.scrollTop=Math.max(0,(h-1)*56);
+    }
+  },[selDay]);
+
+  return(<div style={{display:"flex",flexDirection:"column",position:"absolute",top:0,left:0,right:0,bottom:0,overflow:"hidden"}}>
+    {/* Sticky top: week grid */}
+    <div style={{flexShrink:0,padding:"0 1rem",paddingTop:"1rem",background:"var(--bg-color)",zIndex:2}}>
+      <div className="grid grid-cols-7 mb-1">{t.weekdays.map(d=><div key={d} className="text-center text-xs py-1 font-semibold" style={{color:muted}}>{d}</div>)}</div>
+      <div className="grid grid-cols-7 gap-0.5 mb-3" style={{overflow:"hidden"}} {...calSwipe}>
+        {days.map(ds=>{
+          const d=new Date(ds),isToday=ds===today,isSel=ds===selDay;
+          const dayEvs=allEvents().filter(e=>e.date===ds);
+          const allTags=[...new Set(dayEvs.flatMap(e=>e.tags||[]))];
+          return(<button key={ds} type="button" onClick={()=>setSelDay(ds)}
+            className="rounded-xl p-1 min-h-14 flex flex-col items-center transition-all"
+            style={{background:isSel?"#3B82F6":isToday?"#3B82F620":sub,
+              border:`1.5px solid ${isSel?"#3B82F6":isToday?"#3B82F6":border}`}}>
+            <span className="text-xs font-bold mb-0.5" style={{color:isSel?"#fff":isToday?"#3B82F6":text}}>{d.getDate()}</span>
+            {diary[ds]&&<div className="w-1.5 h-1.5 rounded-full mb-0.5" style={{background:isSel?"rgba(255,255,255,0.8)":"#10B981"}}/>}
+            <div className="flex flex-wrap justify-center gap-0.5">{allTags.slice(0,3).map(id=>{const c=CATS.find(x=>x.id===id);return c?<div key={id} className="w-1.5 h-1.5 rounded-full" style={{background:isSel?"rgba(255,255,255,0.7)":c.color}}/>:null;})}</div>
+            {dayEvs.length>0&&<span style={{color:isSel?"rgba(255,255,255,0.8)":muted,fontSize:"0.55rem"}}>{dayEvs.length>1?`${dayEvs.length}×`:"·"}</span>}
+          </button>);
+        })}
+      </div>
     </div>
 
-    {/* Event list */}
-    {days.map(ds=>{
-      const dayEvs=allEvents().filter(e=>e.date===ds).sort((a,b)=>a.time.localeCompare(b.time));
-      const d=new Date(ds),isToday=ds===today;
-      if(!dayEvs.length&&!diary[ds])return null;
-      return(<div key={ds} className="mb-3">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-xs font-bold" style={{color:isToday?"#3B82F6":muted}}>{t.weekdaysFull[(d.getDay()+6)%7]} {d.getDate()}.{d.getMonth()+1}.</span>
-          {isToday&&<span className="text-xs px-2 py-0.5 rounded-full" style={{background:"#3B82F618",color:"#3B82F6"}}>●</span>}
-          {diary[ds]&&<span className="text-xs px-2 py-0.5 rounded-full" style={{background:"#10B98118",color:"#10B981"}}>📔</span>}
-        </div>
-        {dayEvs.map(ev=><button key={ev.id} onClick={()=>onOpenFull(events[ev.id.split("_")[0]]||ev)} className="w-full flex items-start gap-3 p-3 rounded-xl mb-1.5 text-left" style={{background:card,border:`1px solid ${border}`}}>
-          <div className="text-xs font-bold w-16 pt-0.5 shrink-0" style={{color:muted}}>{ev.time||"–"}{ev.endTime?`–${ev.endTime}`:""}</div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold truncate" style={{color:text}}>{ev.title}{ev.repeat&&ev.repeat!=="none"&&<span className="ml-1 text-xs" style={{color:muted}}>↺</span>}</div>
-            {ev.tags?.length>0&&<div className="flex flex-wrap gap-1 mt-1">{ev.tags.slice(0,3).map(id=>{const c=CATS.find(x=>x.id===id);return c?<TooltipTag key={id} cat={c} dark={dark}/>:null;})}</div>}
+    {/* Time grid or simple list */}
+    {!timeGrid&&<div style={{flex:1,overflowY:"auto",padding:"0 1rem 5rem"}}>
+      {(()=>{
+        const dayEvs=allEvents().filter(e=>e.date===selDay).sort((a,b)=>a.time.localeCompare(b.time));
+        if(!dayEvs.length) return(<div className="text-center py-10 rounded-2xl" style={{background:sub,border:`1px dashed ${border}`}}>
+          <div className="text-3xl mb-2">📅</div>
+          <p className="text-sm font-semibold mb-1" style={{color:text}}>{t.noEvents}</p>
+        </div>);
+        return dayEvs.map(ev=>(
+          <button key={ev.id} type="button" onClick={()=>onOpenFull(events[ev.id.split("_")[0]]||ev)}
+            className="w-full flex items-start gap-3 p-4 rounded-2xl mb-2 text-left"
+            style={{background:card,border:`1px solid ${border}`}}>
+            <div className="text-xs font-bold w-14 pt-0.5 shrink-0" style={{color:"#3B82F6"}}>{ev.time||"–"}{ev.endTime?` – ${ev.endTime}`:""}</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold mb-1" style={{color:text}}>{ev.title}</div>
+              {ev.tags?.length>0&&<div className="flex flex-wrap gap-1">{ev.tags.map(id=>{const c=CATS.find(x=>x.id===id);return c?<span key={id} className="text-xs px-1.5 py-0.5 rounded-full" style={{background:c.color+"22",color:c.color}}>{c.emoji} {c.label}</span>:null;})}</div>}
+            </div>
+            <span style={{color:muted}}>›</span>
+          </button>
+        ));
+      })()}
+    </div>}
+    {timeGrid&&<div ref={timeGridRef} style={{flex:1,overflowY:"auto",position:"relative"}}>
+      <div style={{position:"relative",minHeight:`${24*56}px`,paddingBottom:"2rem"}}>
+        {/* Hour rows */}
+        {Array.from({length:24},(_,h)=>(
+          <div key={h} style={{
+            position:"absolute",top:`${h*56}px`,left:0,right:0,
+            height:56,display:"flex",alignItems:"flex-start"
+          }}>
+            <div style={{
+              width:"3.5rem",paddingRight:"0.5rem",paddingTop:"2px",
+              fontSize:"0.65rem",fontWeight:600,color:muted,
+              textAlign:"right",flexShrink:0
+            }}>{h===0?"":h<12?`${h}:00`:h===12?"12:00":`${h}:00`}</div>
+            <div style={{flex:1,borderTop:`1px solid ${border}`,height:"100%"}}/>
           </div>
-        </button>)}
-      </div>);
-    })}
+        ))}
+        {/* Half-hour lines */}
+        {Array.from({length:24},(_,h)=>(
+          <div key={`h${h}`} style={{
+            position:"absolute",top:`${h*56+28}px`,
+            left:"3.5rem",right:0,
+            borderTop:`1px dashed ${dark?"#1E2A3B":"#F1F5F9"}`
+          }}/>
+        ))}
+        {/* Tap to add event */}
+        {Array.from({length:24},(_,h)=>(
+          <button key={`tap${h}`} type="button"
+            onClick={()=>onOpenEvent(selDay,`${String(h).padStart(2,"0")}:00`)}
+            style={{
+              position:"absolute",top:`${h*56}px`,left:"3.5rem",right:0,
+              height:56,background:"transparent",border:"none",cursor:"pointer",
+              zIndex:1
+            }}/>
+        ))}
+        {/* Current time indicator */}
+        {selDay===today&&(()=>{
+          const now=new Date();
+          const mins=now.getHours()*60+now.getMinutes();
+          const top=(mins/60)*56;
+          return(<>
+            <div style={{position:"absolute",top:`${top}px`,left:"3.5rem",right:0,
+              height:2,background:"#EF4444",zIndex:3}}/>
+            <div style={{position:"absolute",top:`${top-4}px`,left:"3rem",
+              width:10,height:10,borderRadius:"50%",background:"#EF4444",zIndex:3}}/>
+          </>);
+        })()}
+        {/* Events */}
+        {(()=>{
+          const dayEvs=allEvents().filter(e=>e.date===selDay);
+          return dayEvs.map(ev=>{
+            const [eh=0,em=0]=String(ev.time||"00:00").split(":").map(Number);
+            const [eh2=eh+1,em2=0]=(ev.endTime?ev.endTime:"").split(":").map(Number);
+            const topPx=(eh*60+em)/60*56;
+            const endMins=ev.endTime?(eh2*60+em2):(eh*60+em+60);
+            const heightPx=Math.max(28,(endMins-(eh*60+em))/60*56);
+            const cat=CATS.find(c=>(ev.tags||[]).includes(c.id));
+            const color=cat?.color||"#3B82F6";
+            return(
+              <button key={ev.id} type="button"
+                onClick={()=>onOpenFull(events[ev.id.split("_")[0]]||ev)}
+                style={{
+                  position:"absolute",top:`${topPx}px`,
+                  left:"calc(3.5rem + 4px)",right:"4px",
+                  height:`${heightPx}px`,
+                  background:color+"22",border:`1.5px solid ${color}`,
+                  borderRadius:8,padding:"2px 6px",
+                  textAlign:"left",cursor:"pointer",zIndex:2,
+                  overflow:"hidden"
+                }}>
+                <div style={{fontSize:"0.7rem",fontWeight:700,color,lineHeight:1.2}}>{ev.title}</div>
+                {heightPx>36&&<div style={{fontSize:"0.6rem",color,opacity:0.8}}>{ev.time}{ev.endTime?" – "+ev.endTime:""}</div>}
+              </button>
+            );
+          });
+        })()}
+      </div>
+    </div>}
   </div>);
 }
 
 // ── Calendar View ─────────────────────────────────────────────────────────────
-function CalendarView({data,onData,dark,t,CATS,showInfoIcons}){
+
+function CalendarView({data,onData,dark,t,CATS,showInfoIcons,onModalChange,lang,calView,setCalView,timeGrid=true,weekNumbers=true,jumpToDay:extJumpToDay,onJumped:extOnJumped}){
+  const [, forceUpdate] = useState(0);
+  const [selMonthDay, setSelMonthDay] = useState(null);
+  const [jumpToDay, setJumpToDay] = useState(null);
+  // Sync external jumpToDay
+  useEffect(()=>{
+    if(extJumpToDay){ setJumpToDay(extJumpToDay); setCalTab("week"); if(extOnJumped) extOnJumped(); }
+  },[extJumpToDay]);
   const now=new Date();
-  const [calTab,setCalTab]=useState("month");
+  const calTab=calView||"week"; const setCalTab=setCalView;
   const [year,setYear]=useState(now.getFullYear());
   const [month,setMonth]=useState(now.getMonth());
   const [editEv,setEditEv]=useState(null);
@@ -912,58 +1086,79 @@ function CalendarView({data,onData,dark,t,CATS,showInfoIcons}){
     return[...direct,...recurring];
   };
 
-  const openEvent=(ds)=>{setEditEv({date:ds,time:currentHourStr()});setShowModal(true);};
-  const openFull=(ev)=>{setEditEv(ev||{});setShowModal(true);};
+  const openEvent=(ds,time)=>{setEditEv({date:ds,time:time||currentHourStr()});setShowModal(true);if(onModalChange)onModalChange(true);};
+  const closeModal=()=>{setShowModal(false);setEditEv(null);if(onModalChange)onModalChange(false);};
+  const openFull=(ev)=>{setEditEv(ev||{});setShowModal(true);if(onModalChange)onModalChange(true);};
 
   return(<div>
-    <div className="flex gap-1 p-1 rounded-2xl mb-4" style={{background:sub}}>
-      {[{id:"month",l:t.month},{id:"week",l:t.week}].map(tab=>(
-        <button key={tab.id} onClick={()=>setCalTab(tab.id)} className="flex-1 py-2 rounded-xl text-sm font-semibold transition-all"
-          style={{background:calTab===tab.id?card:"transparent",color:calTab===tab.id?text:muted,boxShadow:calTab===tab.id?"0 1px 4px rgba(0,0,0,0.15)":"none"}}>{tab.l}</button>
-      ))}
-    </div>
+{calTab==="week"&&<WeekView data={data} onData={onData} dark={dark} onOpenEvent={openEvent} onOpenFull={openFull} t={t} CATS={CATS} lang={lang} timeGrid={timeGrid} jumpToDay={jumpToDay} onJumped={()=>setJumpToDay(null)}/>}
 
-    {calTab==="week"&&<WeekView data={data} onData={onData} dark={dark} onOpenEvent={openEvent} onOpenFull={openFull} t={t} CATS={CATS}/>}
-
-    {calTab==="month"&&<>
-      <div className="flex items-center justify-between mb-3">
-        <button onClick={()=>{if(month===0){setYear(y=>y-1);setMonth(11);}else setMonth(m=>m-1);}} className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:sub,color:muted}}>‹</button>
-        <span className="font-bold" style={{color:text}}>{t.months[month]} {year}</span>
-        <button onClick={()=>{if(month===11){setYear(y=>y+1);setMonth(0);}else setMonth(m=>m+1);}} className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:sub,color:muted}}>›</button>
+    {calTab==="month"&&<div>
+      <div>
+        {/* Month nav */}
+        <div className="flex items-center justify-between mb-3" style={{paddingTop:"1rem"}}>
+          <button type="button" onClick={()=>{if(month===0){setYear(y=>y-1);setMonth(11);}else setMonth(m=>m-1);}} className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:sub,color:muted}}>‹</button>
+          <span className="font-bold" style={{color:text}}>{t.months[month]} {year}</span>
+          <button type="button" onClick={()=>{if(month===11){setYear(y=>y+1);setMonth(0);}else setMonth(m=>m+1);}} className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:sub,color:muted}}>›</button>
+        </div>
+        {/* Weekday headers with week number column */}
+        <div style={{display:"grid",gridTemplateColumns:weekNumbers?"1.5rem repeat(7,1fr)":"repeat(7,1fr)",gap:"0.125rem",marginBottom:"0.25rem"}}>
+          {weekNumbers&&<div style={{fontSize:"0.55rem",color:muted,textAlign:"center",fontWeight:700}}>W</div>}
+          {t.weekdays.map(d=><div key={d} className="text-center text-xs py-1 font-semibold" style={{color:muted}}>{d}</div>)}
+        </div>
+        {/* Month grid with week numbers */}
+        <div style={{display:"grid",gridTemplateColumns:weekNumbers?"1.5rem repeat(7,1fr)":"repeat(7,1fr)",gap:"0.125rem",marginBottom:"0.25rem"}} {...calSwipe}>
+          {(()=>{
+            const cells = [];
+            let dayCount = 0;
+            let weekNum = null;
+            // Empty cells before first day
+            for(let i=0;i<first;i++){
+              if(i===0){
+                const firstDate = new Date(year,month,1);
+                weekNum = getWeekNumber(firstDate);
+                if(weekNumbers) cells.push(<div key="wn0" style={{fontSize:"0.55rem",color:"#3B82F6",fontWeight:700,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:"2px"}}>{weekNum}</div>);
+              }
+              cells.push(<div key={`x${i}`}/>);
+              dayCount++;
+            }
+            for(let i=1;i<=dim;i++){
+              const ds=`${year}-${String(month+1).padStart(2,"0")}-${String(i).padStart(2,"0")}`;
+              const evs=getMonthEvs(ds),isToday=ds===today;
+              const isSel=selMonthDay===ds;
+              const allTags=[...new Set(evs.flatMap(e=>e.tags||[]))];
+              // Add week number at start of each week row
+              if(dayCount%7===0){
+                weekNum=getWeekNumber(new Date(year,month,i));
+                if(weekNumbers) cells.push(<div key={`wn${i}`} style={{fontSize:"0.55rem",color:"#3B82F6",fontWeight:700,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:"2px"}}>{weekNum}</div>);
+              }
+              cells.push(
+                <button key={i} type="button" onClick={()=>{setJumpToDay(ds);setCalTab('week');setCalView('week');}}
+                  className="rounded-xl p-1 flex flex-col items-center transition-all"
+                  style={{background:isSel?"#3B82F6":isToday?"#3B82F620":sub,
+                    border:`1.5px solid ${isSel?"#3B82F6":isToday?"#3B82F6":border}`,
+                    minHeight:"2.25rem"}}>
+                  <span className="text-xs font-bold mb-0.5" style={{color:isSel?"#fff":isToday?"#3B82F6":text}}>{i}</span>
+                  {(data.diary||{})[ds]&&<div className="w-1.5 h-1.5 rounded-full mb-0.5" style={{background:isSel?"rgba(255,255,255,0.8)":"#10B981"}}/>}
+                  <div className="flex flex-wrap justify-center gap-0.5">{allTags.slice(0,3).map(id=>{const c=CATS.find(x=>x.id===id);return c?<div key={id} className="w-1.5 h-1.5 rounded-full" style={{background:isSel?"rgba(255,255,255,0.7)":c.color}}/>:null;})}</div>
+                  {evs.length>0&&<span style={{color:isSel?"rgba(255,255,255,0.8)":muted,fontSize:"0.55rem"}}>{evs.length>1?`${evs.length}×`:"·"}</span>}
+                </button>
+              );
+              dayCount++;
+            }
+            return cells;
+          })()}
+        </div>
       </div>
-      <button onClick={()=>{const n=new Date();setYear(n.getFullYear());setMonth(n.getMonth());}} className="w-full py-2 rounded-xl text-xs font-semibold mb-4" style={{background:"#3B82F615",color:"#3B82F6",border:"1px solid #3B82F630"}}>{t.today}</button>
-      <div className="grid grid-cols-7 mb-1">{t.weekdays.map(d=><div key={d} className="text-center text-xs py-1 font-semibold" style={{color:muted}}>{d}</div>)}</div>
-      <div className="grid grid-cols-7 gap-0.5 mb-5" {...calSwipe}>
-        {Array.from({length:first}).map((_,i)=><div key={`x${i}`}/>)}
-        {Array.from({length:dim}).map((_,i)=>{
-          const day=i+1,ds=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-          const evs=getMonthEvs(ds),isToday=ds===today;
-          const allTags=[...new Set(evs.flatMap(e=>e.tags||[]))];
-          return(<button key={day} onClick={()=>openEvent(ds)} className="rounded-xl p-1 min-h-14 flex flex-col items-center transition-all" style={{background:isToday?"#3B82F620":sub,border:`1.5px solid ${isToday?"#3B82F6":border}`}}>
-            <span className="text-xs font-bold mb-0.5" style={{color:isToday?"#3B82F6":text}}>{day}</span>
-            {(data.diary||{})[ds]&&<div className="w-1.5 h-1.5 rounded-full mb-0.5" style={{background:"#10B981"}}/>}
-            <div className="flex flex-wrap justify-center gap-0.5">{allTags.slice(0,3).map(id=>{const c=CATS.find(x=>x.id===id);return c?<div key={id} className="w-1.5 h-1.5 rounded-full" style={{background:c.color}}/>:null;})}</div>
-            {evs.length>0&&<span style={{color:muted,fontSize:"0.55rem"}}>{evs.length>1?`${evs.length}×`:"·"}</span>}
-          </button>);
-        })}
+
+      {/* Hint */}
+      <div style={{padding:"0.75rem 1rem",textAlign:"center"}}>
+        <p style={{fontSize:"0.7rem",color:"#94A3B8"}}>{lang==="fi"?"Napauta päivää avataksesi viikkonäkymän":"Tap a day to open week view"}</p>
       </div>
-      <p className="text-xs font-bold tracking-wider mb-3" style={{color:muted}}>{t.events}</p>
-      {Object.values(events).filter(e=>e.date?.startsWith(monthStr)).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).map(ev=>(
-        <button key={ev.id} onClick={()=>openFull(ev)} className="w-full flex items-center gap-3 p-3 rounded-2xl mb-2 text-left" style={{background:card,border:`1px solid ${border}`}}>
-          <div className="text-xs font-bold w-16 shrink-0" style={{color:muted}}>{ev.time||"–"}{ev.endTime?`–${ev.endTime}`:""}</div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5"><span className="text-sm font-semibold truncate" style={{color:text}}>{ev.title}</span>{ev.repeat&&ev.repeat!=="none"&&<span style={{color:muted}}>↺</span>}</div>
-            {ev.tags?.length>0&&<div className="flex flex-wrap gap-1 mt-1">{ev.tags.map(id=>{const c=CATS.find(x=>x.id===id);return c?<TooltipTag key={id} cat={c} dark={dark}/>:null;})}</div>}
-          </div>
-          <span style={{color:muted}}>›</span>
-        </button>
-      ))}
-      {!Object.values(events).find(e=>e.date?.startsWith(monthStr))&&<div className="text-center py-8" style={{color:muted}}><div className="text-3xl mb-2">📅</div><p className="text-sm">{t.noEvents}</p></div>}
-    </>}
+    </div>}
 
-    <button onClick={()=>openEvent(today)} className="fixed bottom-24 right-4 w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-2xl z-40" style={{background:"#3B82F6",color:"#fff",boxShadow:"0 4px 20px #3B82F660"}}>+</button>
 
-    {showModal&&<EventModal ev={editEv} onSave={saveEv} onDelete={delEv} onClose={()=>{setShowModal(false);setEditEv(null);}}
+    {showModal&&<EventModal ev={editEv} onSave={saveEv} onDelete={delEv} onClose={closeModal}
       dark={dark} t={t} CATS={CATS} templates={templates} onSaveTemplate={saveTemplate} onDeleteTemplate={delTemplate} showInfoIcons={showInfoIcons}/>}
   </div>);
 }
@@ -974,8 +1169,8 @@ function EntryModal({entry,date,CATS,dark,t,onClose}){
   const avg=CATS.map(c=>scores[c.id]||5).reduce((a,b)=>a+b,0)/CATS.length;
   const card=dark?"#1A2332":"#FFFFFF",border=dark?"#2D3F55":"#E8EEF4";
   const text=dark?"#E2E8F0":"#1E293B",muted="#94A3B8";
-  return(<div className="fixed inset-0 z-50 flex items-end justify-center" style={{background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)"}} onClick={onClose}>
-    <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"88vh"}} onClick={e=>e.stopPropagation()}>
+  return(<div className="fixed z-[100] flex items-end justify-center" style={{inset:0,background:"rgba(0,0,0,0.95)"}} onClick={onClose}>
+    <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"calc(100vh - var(--header-h,56px) - 3.5rem)",boxShadow:"0 -4px 40px rgba(0,0,0,0.5)"}} onClick={e=>e.stopPropagation()}>
       <div className="px-5 pt-5 pb-3 flex items-center justify-between sticky top-0 z-10" style={{background:card}}>
         <div>
           <div className="font-bold text-base" style={{color:text}}>{formatFi(date,t.months)}</div>
@@ -1083,6 +1278,7 @@ function GratitudeView({data, onData, dark, t, onSaved}) {
           ))}
         </div>
       ))}
+
     </>}
   </div>);
 }
@@ -1552,13 +1748,13 @@ function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
     {diaryTab==="library"&&<DiaryLibrary diary={diary} CATS={CATS} dark={dark} t={t}/>}
 
     {/* Post-assessment modal */}
-    {showPostAssess&&<div className="fixed inset-0 z-50 flex items-end justify-center" style={{background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)"}} onClick={()=>setShowPostAssess(false)}>
-      <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"85vh"}} onClick={e=>e.stopPropagation()}>
+    {showPostAssess&&<div className="fixed z-50 flex items-end justify-center" style={{inset:0,background:"rgba(0,0,0,0.95)"}} onClick={()=>setShowPostAssess(false)}>
+      <div className="w-full max-w-md rounded-t-3xl overflow-y-auto" style={{background:card,maxHeight:"calc(100vh - var(--header-h,56px) - 3.5rem)",boxShadow:"0 -4px 40px rgba(0,0,0,0.5)"}} onClick={e=>e.stopPropagation()}>
         <div className="px-5 pt-5 pb-3 flex items-center justify-between sticky top-0 z-10" style={{background:card}}>
           <h3 className="font-bold text-base" style={{color:textC}}>{t.postAssessTitle}</h3>
           <button type="button" onClick={()=>setShowPostAssess(false)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{background:dark?"#1E2A3B":"#F1F5F9",color:muted}}>×</button>
         </div>
-        <div className="px-5 pb-8">
+        <div className="px-5" style={{paddingBottom:"6rem"}}>
           <p className="text-xs mb-4" style={{color:muted}}>{t.postAssessSub}</p>
           {/* Show bottom 3 scoring areas */}
           {[...CATS].map(c=>({...c,score:scores[c.id]||5})).sort((a,b)=>a.score-b.score).slice(0,3).map(c=>(
@@ -1706,6 +1902,7 @@ const getTodaysQuestion = (insight) => {
 
 // ── Growth View ───────────────────────────────────────────────────────────────
 function GrowthView({data, dark, t, CATS, lang}) {
+  const [openCatInfo, setOpenCatInfo] = useState(null);
   const [expandedCat, setExpandedCat] = useState(null);
   const diary = data.diary || {};
   const dates = Object.keys(diary).sort().slice(-30);
@@ -1795,7 +1992,7 @@ function GrowthView({data, dark, t, CATS, lang}) {
             width:"100%",maxWidth:"380px",borderRadius:"1.5rem",padding:"1.5rem",
             background:dark?"#1A2332":"#ffffff",
             border:`2px solid ${expandedCat.color}60`,
-            boxSizing:"border-box",maxHeight:"80vh",overflowY:"auto"
+            boxSizing:"border-box",maxHeight:"calc(100vh - var(--header-h,56px) - 3.5rem)",overflowY:"auto"
           }}>
             {/* Header */}
             <div style={{display:"flex",alignItems:"center",gap:"0.75rem",marginBottom:"1rem"}}>
@@ -1857,16 +2054,21 @@ function GrowthView({data, dark, t, CATS, lang}) {
           <p className="text-xs font-bold mb-3" style={{color:"#10B981"}}>⭐ {t.strongAreas}</p>
           {strongCats.map(c=>(
             <div key={c.id} className="flex items-center gap-3 mb-3">
-              <span className="text-lg shrink-0">{c.emoji}</span>
+              <button type="button" onClick={()=>setOpenCatInfo(c)}
+                className="text-lg shrink-0">{c.emoji}</button>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between mb-1">
-                  <span className="text-sm font-medium" style={{color:text}}>{c.label}</span>
+                  <button type="button" onClick={()=>setOpenCatInfo(c)}
+                    className="text-sm font-medium text-left" style={{color:text}}>{c.label}</button>
                   <span className="text-sm font-bold ml-2 shrink-0" style={{color:c.color}}>{c.avg.toFixed(1)}</span>
                 </div>
                 <div className="h-2 rounded-full" style={{background:dark?"#2D3F55":"#E8EEF4"}}>
                   <div style={{width:`${(c.avg/10)*100}%`,height:"100%",background:c.color,borderRadius:"9999px"}}/>
                 </div>
               </div>
+              <button type="button" onClick={()=>setOpenCatInfo(c)}
+                className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{background:c.color+"20",color:c.color}}>ⓘ</button>
             </div>
           ))}
         </div>
@@ -1875,18 +2077,64 @@ function GrowthView({data, dark, t, CATS, lang}) {
           <p className="text-xs font-bold mb-3" style={{color:"#3B82F6"}}>🎯 {t.developAreas}</p>
           {developCats.map(c=>(
             <div key={c.id} className="flex items-center gap-3 mb-3">
-              <span className="text-lg shrink-0">{c.emoji}</span>
+              <button type="button" onClick={()=>setOpenCatInfo(c)}
+                className="text-lg shrink-0">{c.emoji}</button>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between mb-1">
-                  <span className="text-sm font-medium" style={{color:text}}>{c.label}</span>
+                  <button type="button" onClick={()=>setOpenCatInfo(c)}
+                    className="text-sm font-medium text-left" style={{color:text}}>{c.label}</button>
                   <span className="text-sm font-bold ml-2 shrink-0" style={{color:c.color}}>{c.avg.toFixed(1)}</span>
                 </div>
                 <div className="h-2 rounded-full" style={{background:dark?"#2D3F55":"#E8EEF4"}}>
                   <div style={{width:`${(c.avg/10)*100}%`,height:"100%",background:c.color,borderRadius:"9999px"}}/>
                 </div>
               </div>
+              <button type="button" onClick={()=>setOpenCatInfo(c)}
+                className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{background:c.color+"20",color:c.color}}>ⓘ</button>
             </div>
           ))}
+        </div>
+      </div>
+    )}
+
+    {/* Category info modal */}
+    {openCatInfo&&(
+      <div onClick={()=>setOpenCatInfo(null)} style={{
+        position:"fixed",inset:0,zIndex:200,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        padding:"1.5rem",background:"rgba(0,0,0,0.7)",backdropFilter:"blur(4px)"
+      }}>
+        <div onClick={e=>e.stopPropagation()} style={{
+          width:"100%",maxWidth:"360px",borderRadius:"1.5rem",padding:"1.5rem",
+          background:dark?"#1A2332":"#ffffff",
+          border:`2px solid ${openCatInfo.color}60`,boxSizing:"border-box"
+        }}>
+          <div style={{display:"flex",alignItems:"center",gap:"0.75rem",marginBottom:"1rem"}}>
+            <div style={{width:"3rem",height:"3rem",borderRadius:"0.875rem",flexShrink:0,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:"1.5rem",background:openCatInfo.color+"22"}}>
+              {openCatInfo.emoji}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:"0.6875rem",fontWeight:700,color:openCatInfo.color,
+                marginBottom:"0.125rem",letterSpacing:"0.05em"}}>{openCatInfo.section}</div>
+              <div style={{fontSize:"1rem",fontWeight:700,color:dark?"#E2E8F0":"#1E293B"}}>
+                {openCatInfo.label}
+              </div>
+            </div>
+          </div>
+          <p style={{fontSize:"0.875rem",lineHeight:1.65,
+            color:dark?"#94A3B8":"#64748B",margin:"0 0 1.25rem 0"}}>
+            {openCatInfo.info}
+          </p>
+          <button type="button" onClick={()=>setOpenCatInfo(null)} style={{
+            display:"block",width:"100%",padding:"0.875rem",
+            borderRadius:"1rem",fontSize:"0.9375rem",fontWeight:700,
+            border:"none",cursor:"pointer",
+            background:openCatInfo.color+"22",color:openCatInfo.color,
+            boxSizing:"border-box",minHeight:"52px"
+          }}>{t.infoClose}</button>
         </div>
       </div>
     )}
@@ -2017,145 +2265,185 @@ function PermaStep({dark, t, CATS, card, border, muted, text, onBack, onNext}) {
 function OnboardingView({dark, t, CATS, onComplete, onLang}) {
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
-  const bg = dark ? "#0F1826" : "#F0F4F8";
-  const card = dark ? "#1A2332" : "#FFFFFF";
-  const border = dark ? "#2D3F55" : "#E8EEF4";
-  const text = dark ? "#E2E8F0" : "#1E293B";
+  const [openCat, setOpenCat] = useState(null);
+
+  const bg = "#0F1826";
+  const card = "#1A2332";
+  const border = "#2D3F55";
+  const text = "#E2E8F0";
   const muted = "#94A3B8";
 
-  const steps = [
-    // Step -1 (index 0) — Language selection
-    <div key="lang" style={{overflowY:"auto",padding:"2rem 1.5rem",boxSizing:"border-box"}}>
-      <div style={{textAlign:"center",marginBottom:"2.5rem",paddingTop:"2rem"}}>
-        <div style={{fontSize:"3rem",marginBottom:"1rem"}}>🌍</div>
-        <h1 style={{fontSize:"1.75rem",fontWeight:900,color:"#E2E8F0",margin:"0 0 0.75rem 0"}}>Lumen Ascent</h1>
-        <p style={{fontSize:"0.875rem",color:"#94A3B8",margin:0}}>{"Valitse kieli / Choose your language"}</p>
-      </div>
-      <button type="button" onClick={()=>{onLang("fi");setStep(1);}} style={{
-        display:"block",width:"100%",padding:"1.125rem",borderRadius:"1rem",
-        fontSize:"1rem",fontWeight:700,border:"2px solid #2D3F55",cursor:"pointer",
-        background:"#1A2332",color:"#E2E8F0",marginBottom:"0.75rem",
-        boxSizing:"border-box",minHeight:"56px",textAlign:"left",
-        display:"flex",alignItems:"center",gap:"0.875rem"
-      }}>
-        <span style={{fontSize:"1.5rem"}}>🇫🇮</span>
-        <div><div style={{fontWeight:700}}>Suomi</div><div style={{fontSize:"0.8125rem",color:"#94A3B8",fontWeight:400}}>Finnish</div></div>
-      </button>
-      <button type="button" onClick={()=>{onLang("en");setStep(1);}} style={{
-        display:"block",width:"100%",padding:"1.125rem",borderRadius:"1rem",
-        fontSize:"1rem",fontWeight:700,border:"2px solid #2D3F55",cursor:"pointer",
-        background:"#1A2332",color:"#E2E8F0",marginBottom:"2rem",
-        boxSizing:"border-box",minHeight:"56px",textAlign:"left",
-        display:"flex",alignItems:"center",gap:"0.875rem"
-      }}>
-        <span style={{fontSize:"1.5rem"}}>🇬🇧</span>
-        <div><div style={{fontWeight:700}}>English</div><div style={{fontSize:"0.8125rem",color:"#94A3B8",fontWeight:400}}>Englanti</div></div>
-      </button>
-      <div style={{display:"flex",justifyContent:"center",gap:"0.5rem"}}>
-        {[0,1,2,3].map(i=><div key={i} style={{width:i===0?16:6,height:6,borderRadius:"9999px",background:i===0?"#3B82F6":"#2D3F55"}}/>)}
-      </div>
-    </div>,
+  const next = () => setStep(s => s + 1);
+  const back = () => setStep(s => s - 1);
 
-    // Step 1 — Welcome + name
-    <div key="0" style={{overflowY:"auto",padding:"2rem 1.5rem",boxSizing:"border-box"}}>
-      <div style={{textAlign:"center",marginBottom:"2rem",paddingTop:"1rem"}}>
-        <div style={{fontSize:"3rem",marginBottom:"1rem"}}>✦</div>
-        <h1 style={{fontSize:"1.75rem",fontWeight:900,color:"#E2E8F0",margin:"0 0 0.5rem 0"}}>Lumen Ascent</h1>
-        <p style={{fontSize:"1rem",fontWeight:600,color:"#3B82F6",margin:"0 0 1.5rem 0"}}>{t.onboardingSlogan}</p>
-        <p style={{fontSize:"0.875rem",lineHeight:1.6,color:"#94A3B8",margin:0}}>{t.ob1Sub}</p>
-      </div>
-      <p style={{fontSize:"0.75rem",fontWeight:700,letterSpacing:"0.05em",color:"#94A3B8",marginBottom:"0.5rem"}}>
-        {t.onboardingNameQ.toUpperCase()}
-      </p>
-      <input
-        value={name}
-        onChange={e=>setName(e.target.value)}
-        placeholder={t.onboardingNamePlaceholder}
-        autoFocus
-        style={{
-          display:"block",width:"100%",padding:"1rem",
-          borderRadius:"1rem",fontSize:"1rem",fontWeight:600,
-          textAlign:"center",outline:"none",boxSizing:"border-box",
-          background:"#1A2332",border:"1.5px solid #3B82F6",
-          color:"#E2E8F0",marginBottom:"1rem"
-        }}
-      />
-      <button type="button" onClick={()=>setStep(1)} style={{
-        display:"block",width:"100%",padding:"1rem",
-        borderRadius:"1rem",fontSize:"1rem",fontWeight:700,
-        border:"none",cursor:"pointer",
-        background:"#3B82F6",color:"#ffffff",
-        WebkitTextFillColor:"#ffffff",
-        marginBottom:"1rem",boxSizing:"border-box",
-        minHeight:"52px",lineHeight:"1.5"
-      }}>
-        <span style={{color:"#ffffff",WebkitTextFillColor:"#ffffff",fontWeight:700,fontSize:"1rem"}}>
-          {name.trim() ? (t.onboardingNext||"Jatka") : (t.onboardingSkip||"Ohita")}
-        </span>
-      </button>
-      {name.trim()&&<button type="button" onClick={()=>setStep(1)} style={{
-        display:"block",width:"100%",padding:"0.875rem",
-        borderRadius:"1rem",fontSize:"0.9375rem",fontWeight:600,
-        border:"none",cursor:"pointer",
-        background:"#2D3F55",color:"#E2E8F0",
-        marginBottom:"1rem",boxSizing:"border-box",
-        minHeight:"48px",lineHeight:"1.5"
-      }}>{t.onboardingSkip||"Ohita"}</button>}
-      <div style={{display:"flex",justifyContent:"center",gap:"0.5rem",paddingTop:"1rem",paddingBottom:"1rem"}}>
-        {[0,1,2].map(i=>(
-          <div key={i} style={{width:i===0?16:6,height:6,borderRadius:"9999px",
-            background:i===0?"#3B82F6":"#2D3F55"}}/>
-        ))}
-      </div>
-    </div>,
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:80,background:bg,overflowY:"auto"}}>
 
-        // Step 1 — PERMA+4 (rendered as separate component to support useState)
-    <PermaStep key="1" dark={dark} t={t} CATS={CATS} card={card} border={border} muted={muted} text={text}
-      onBack={()=>setStep(0)} onNext={()=>setStep(2)}/>,
-
-    // Step 2 — How it works
-    <div key="2" className="flex flex-col min-h-screen px-6 pt-16 pb-8">
-      <div className="text-center mb-10">
-        <h2 className="text-2xl font-black mb-3" style={{color:text}}>{t.ob3Title}</h2>
-      </div>
-      <div className="flex-1">
-        {[
-          {emoji:"📔", text:t.ob3Step1, color:"#3B82F6"},
-          {emoji:"📊", text:t.ob3Step2, color:"#10B981"},
-          {emoji:"🎯", text:t.ob3Step3, color:"#8B5CF6"},
-        ].map((step,i)=>(
-          <div key={i} className="flex items-center gap-4 p-4 rounded-2xl mb-3"
-            style={{background:card,border:`1px solid ${step.color}30`}}>
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0"
-              style={{background:step.color+"20"}}>{step.emoji}</div>
-            <p className="text-sm font-medium" style={{color:text}}>{step.text}</p>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-3 mt-8">
-        <button type="button" onClick={()=>setStep(1)}
-          className="px-4 py-3 rounded-2xl text-sm font-semibold"
-          style={{background:card,color:muted}}>←</button>
-        <button type="button" onClick={()=>onComplete(name.trim())}
-          className="flex-1 py-4 rounded-2xl font-bold text-base"
-          style={{background:"#3B82F6",color:"#fff",boxShadow:"0 4px 20px #3B82F650"}}>
-          {t.onboardingStart} {name.trim()?""+name+" ":""}
+      {/* Step 0 — Language */}
+      {step===0&&<div style={{padding:"2rem 1.5rem",boxSizing:"border-box"}}>
+        <div style={{textAlign:"center",marginBottom:"2.5rem",paddingTop:"2rem"}}>
+          <div style={{fontSize:"3rem",marginBottom:"1rem"}}>🌍</div>
+          <h1 style={{fontSize:"1.75rem",fontWeight:900,color:text,margin:"0 0 0.75rem 0"}}>Lumen Ascent</h1>
+          <p style={{fontSize:"0.875rem",color:muted,margin:0}}>Valitse kieli / Choose your language</p>
+        </div>
+        <button type="button" onClick={()=>{onLang("fi");next();}} style={{
+          display:"flex",width:"100%",padding:"1.125rem",borderRadius:"1rem",
+          fontSize:"1rem",fontWeight:700,border:"2px solid "+border,cursor:"pointer",
+          background:card,color:text,marginBottom:"0.75rem",
+          boxSizing:"border-box",minHeight:"56px",alignItems:"center",gap:"0.875rem"
+        }}>
+          <span style={{fontSize:"1.5rem"}}>🇫🇮</span>
+          <div><div style={{fontWeight:700}}>Suomi</div><div style={{fontSize:"0.8125rem",color:muted,fontWeight:400}}>Finnish</div></div>
         </button>
-      </div>
-      {/* Step dots */}
-      <div className="flex justify-center gap-2 mt-4">
-        {[0,1,2].map(i=><div key={i} className="rounded-full" style={{width:i===2?16:6,height:6,background:i===2?"#3B82F6":dark?"#2D3F55":"#E2E8F0",transition:"all 0.3s"}}/>)}
-      </div>
-    </div>
-  ];
+        <button type="button" onClick={()=>{onLang("en");next();}} style={{
+          display:"flex",width:"100%",padding:"1.125rem",borderRadius:"1rem",
+          fontSize:"1rem",fontWeight:700,border:"2px solid "+border,cursor:"pointer",
+          background:card,color:text,marginBottom:"2rem",
+          boxSizing:"border-box",minHeight:"56px",alignItems:"center",gap:"0.875rem"
+        }}>
+          <span style={{fontSize:"1.5rem"}}>🇬🇧</span>
+          <div><div style={{fontWeight:700}}>English</div><div style={{fontSize:"0.8125rem",color:muted,fontWeight:400}}>Englanti</div></div>
+        </button>
+        <div style={{display:"flex",justifyContent:"center",gap:"0.5rem"}}>
+          {[0,1,2,3].map(i=><div key={i} style={{width:i===0?16:6,height:6,borderRadius:"9999px",background:i===0?"#3B82F6":"#2D3F55"}}/>)}
+        </div>
+      </div>}
 
-  return(
-    <div className="fixed inset-0 z-[80]" style={{background:"#0F1826",overflowY:"auto"}}>
-      {steps[step]}
+      {/* Step 1 — Name */}
+      {step===1&&<div style={{padding:"2rem 1.5rem",boxSizing:"border-box"}}>
+        <div style={{textAlign:"center",marginBottom:"2rem",paddingTop:"1rem"}}>
+          <div style={{fontSize:"3rem",marginBottom:"1rem"}}>✦</div>
+          <h1 style={{fontSize:"1.75rem",fontWeight:900,color:text,margin:"0 0 0.5rem 0"}}>Lumen Ascent</h1>
+          <p style={{fontSize:"1rem",fontWeight:600,color:"#3B82F6",margin:"0 0 1.5rem 0"}}>{t.onboardingSlogan}</p>
+          <p style={{fontSize:"0.875rem",lineHeight:1.6,color:muted,margin:0}}>{t.ob1Sub}</p>
+        </div>
+        <p style={{fontSize:"0.75rem",fontWeight:700,letterSpacing:"0.05em",color:muted,marginBottom:"0.5rem"}}>
+          {t.onboardingNameQ?.toUpperCase()}
+        </p>
+        <input value={name} onChange={e=>setName(e.target.value)}
+          placeholder={t.onboardingNamePlaceholder}
+          style={{display:"block",width:"100%",padding:"1rem",borderRadius:"1rem",
+            fontSize:"1rem",fontWeight:600,textAlign:"center",outline:"none",
+            boxSizing:"border-box",background:card,border:"1.5px solid #3B82F6",
+            color:text,marginBottom:"1rem"}}/>
+        <button type="button" onClick={next} style={{
+          display:"block",width:"100%",padding:"1rem",borderRadius:"1rem",
+          fontSize:"1rem",fontWeight:700,border:"none",cursor:"pointer",
+          background:"#3B82F6",color:"#fff",marginBottom:"0.75rem",
+          boxSizing:"border-box",minHeight:"52px"
+        }}>{name.trim()?(t.onboardingNext||"Jatka"):(t.onboardingSkip||"Ohita")}</button>
+        {name.trim()&&<button type="button" onClick={next} style={{
+          display:"block",width:"100%",padding:"0.875rem",borderRadius:"1rem",
+          fontSize:"0.9375rem",fontWeight:600,border:"2px solid "+border,cursor:"pointer",
+          background:"transparent",color:text,marginBottom:"1rem",boxSizing:"border-box",minHeight:"48px"
+        }}>{t.onboardingSkip||"Ohita"}</button>}
+        <div style={{display:"flex",justifyContent:"center",gap:"0.5rem",paddingTop:"1rem"}}>
+          {[0,1,2,3].map(i=><div key={i} style={{width:i===1?16:6,height:6,borderRadius:"9999px",background:i===1?"#3B82F6":"#2D3F55"}}/>)}
+        </div>
+      </div>}
+
+      {/* Step 2 — PERMA+4 */}
+      {step===2&&<div style={{padding:"2rem 1.5rem",boxSizing:"border-box"}}>
+        <div style={{textAlign:"center",marginBottom:"1.5rem",paddingTop:"1rem"}}>
+          <h2 style={{fontSize:"1.5rem",fontWeight:900,color:text,margin:"0 0 0.75rem 0"}}>{t.ob2Title}</h2>
+          <p style={{fontSize:"0.875rem",lineHeight:1.5,color:muted,margin:0}}>{t.ob2Sub}</p>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"0.5rem",marginBottom:"1.5rem"}}>
+          {CATS.map(cat=>(
+            <button key={cat.id} type="button" onClick={()=>setOpenCat(cat)} style={{
+              padding:"0.75rem 0.25rem",borderRadius:"1rem",
+              border:"1.5px solid "+cat.color+"40",background:card,cursor:"pointer",
+              display:"flex",flexDirection:"column",alignItems:"center",boxSizing:"border-box"
+            }}>
+              <span style={{fontSize:"1.25rem",marginBottom:"0.375rem"}}>{cat.emoji}</span>
+              <span style={{fontSize:"0.6rem",fontWeight:600,lineHeight:1.2,color:text,textAlign:"center"}}>{cat.label}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:"0.75rem"}}>
+          <button type="button" onClick={back} style={{
+            padding:"0.875rem 1.25rem",borderRadius:"1rem",fontSize:"0.9375rem",
+            fontWeight:600,cursor:"pointer",background:card,color:muted,
+            border:"1px solid "+border,boxSizing:"border-box",minHeight:"52px"
+          }}>←</button>
+          <button type="button" onClick={next} style={{
+            flex:1,padding:"0.875rem",borderRadius:"1rem",fontSize:"0.9375rem",
+            fontWeight:700,cursor:"pointer",background:"#3B82F6",color:"#fff",
+            border:"none",boxSizing:"border-box",minHeight:"52px"
+          }}>{t.onboardingNext||"Jatka"} →</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"center",gap:"0.5rem",paddingTop:"1.25rem"}}>
+          {[0,1,2,3].map(i=><div key={i} style={{width:i===2?16:6,height:6,borderRadius:"9999px",background:i===2?"#3B82F6":"#2D3F55"}}/>)}
+        </div>
+        {openCat&&<div onClick={()=>setOpenCat(null)} style={{
+          position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",
+          justifyContent:"center",padding:"1.5rem",background:"rgba(0,0,0,0.7)"
+        }}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            width:"100%",maxWidth:"360px",borderRadius:"1.5rem",padding:"1.5rem",
+            background:card,border:"2px solid "+openCat.color+"60",boxSizing:"border-box"
+          }}>
+            <div style={{display:"flex",alignItems:"center",gap:"0.75rem",marginBottom:"1rem"}}>
+              <div style={{width:"3rem",height:"3rem",borderRadius:"0.875rem",flexShrink:0,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:"1.5rem",background:openCat.color+"22"}}>{openCat.emoji}</div>
+              <div>
+                <div style={{fontSize:"0.6875rem",fontWeight:700,color:openCat.color,letterSpacing:"0.05em"}}>{openCat.section}</div>
+                <div style={{fontSize:"1rem",fontWeight:700,color:text}}>{openCat.label}</div>
+              </div>
+            </div>
+            <p style={{fontSize:"0.875rem",lineHeight:1.65,color:muted,margin:"0 0 1.25rem 0"}}>{openCat.info}</p>
+            <button type="button" onClick={()=>setOpenCat(null)} style={{
+              display:"block",width:"100%",padding:"0.875rem",borderRadius:"1rem",
+              fontSize:"0.9375rem",fontWeight:700,border:"none",cursor:"pointer",
+              background:openCat.color+"22",color:openCat.color,boxSizing:"border-box",minHeight:"52px"
+            }}>{t.infoClose||"Selvä!"}</button>
+          </div>
+        </div>}
+      </div>}
+
+      {/* Step 3 — How it works */}
+      {step===3&&<div style={{padding:"2rem 1.5rem",boxSizing:"border-box"}}>
+        <div style={{textAlign:"center",marginBottom:"2rem",paddingTop:"1rem"}}>
+          <h2 style={{fontSize:"1.5rem",fontWeight:900,color:text,margin:"0 0 0.75rem 0"}}>{t.ob3Title}</h2>
+        </div>
+        <div style={{marginBottom:"1.5rem"}}>
+          {[
+            {emoji:"📔",text:t.ob3Step1,color:"#3B82F6"},
+            {emoji:"📊",text:t.ob3Step2,color:"#10B981"},
+            {emoji:"🎯",text:t.ob3Step3,color:"#8B5CF6"},
+          ].map((s,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:"1rem",
+              padding:"1rem",borderRadius:"1rem",marginBottom:"0.75rem",
+              background:card,border:"1px solid "+s.color+"30"}}>
+              <div style={{width:"3rem",height:"3rem",borderRadius:"0.875rem",
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:"1.5rem",background:s.color+"20",flexShrink:0}}>{s.emoji}</div>
+              <p style={{fontSize:"0.875rem",fontWeight:500,color:text,margin:0}}>{s.text}</p>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:"0.75rem"}}>
+          <button type="button" onClick={back} style={{
+            padding:"0.875rem 1.25rem",borderRadius:"1rem",fontSize:"0.9375rem",
+            fontWeight:600,cursor:"pointer",background:card,color:muted,
+            border:"1px solid "+border,boxSizing:"border-box",minHeight:"52px"
+          }}>←</button>
+          <button type="button" onClick={()=>onComplete(name.trim())} style={{
+            flex:1,padding:"1rem",borderRadius:"1rem",fontSize:"1rem",
+            fontWeight:700,border:"none",cursor:"pointer",
+            background:"#3B82F6",color:"#fff",boxSizing:"border-box",minHeight:"52px",
+            boxShadow:"0 4px 20px #3B82F650"
+          }}>{t.onboardingStart||"Aloitetaan"} {name.trim()?"— "+name:""}</button>
+        </div>
+        <div style={{display:"flex",justifyContent:"center",gap:"0.5rem",paddingTop:"1.25rem"}}>
+          {[0,1,2,3].map(i=><div key={i} style={{width:i===3?16:6,height:6,borderRadius:"9999px",background:i===3?"#3B82F6":"#2D3F55"}}/>)}
+        </div>
+      </div>}
+
     </div>
   );
 }
-
 
 // ── Daily Welcome View ────────────────────────────────────────────────────────
 function DailyWelcomeView({dark, t, CATS, lang, userName, onContinue}) {
@@ -2360,18 +2648,7 @@ function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
       );
     })()}
 
-    {/* Quick links */}
-    <p className="text-xs font-bold tracking-wider mb-3" style={{color:muted}}>{t.homeQuickLinks}</p>
-    <div className="grid grid-cols-3 gap-2 mb-4">
-      {quickLinks.map(link=>(
-        <button key={link.id} type="button" onClick={()=>onNavigate(link.id)}
-          className="rounded-2xl p-4 flex flex-col items-center gap-2"
-          style={{background:card,border:`1px solid ${border}`}}>
-          <span className="text-2xl">{link.icon}</span>
-          <span className="text-xs font-semibold" style={{color:text}}>{link.label}</span>
-        </button>
-      ))}
-    </div>
+
 
     {/* Day done indicator — below quick links, only when done */}
     {diaryDone&&<button type="button" onClick={()=>onNavigate("diary")}
@@ -2408,7 +2685,7 @@ function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
 }
 
 // ── Stats View ────────────────────────────────────────────────────────────────
-function StatsView({data,dark,t,CATS,showInfoIcons}){
+function StatsView({data,dark,t,CATS,showInfoIcons,onNavigate,lang}){
   const diary=data.diary||{},events=data.events||{};
   const dates=Object.keys(diary).sort().slice(-30);
   const streak=calcStreak(diary);
@@ -2428,7 +2705,7 @@ function StatsView({data,dark,t,CATS,showInfoIcons}){
       <div className="text-4xl">{streak>=30?"🔥":streak>=14?"⚡":streak>=7?"✨":"🌱"}</div>
       <div><div className="text-lg font-black leading-tight" style={{color:"#F59E0B"}}>{t.streakLabel(streak)}</div><div className="text-xs mt-0.5" style={{color:muted}}>{t.streakMsg(streak)}</div></div>
     </div>
-    <BestWeekCard diary={diary} CATS={CATS} dark={dark} t={t}/>
+    <BestWeekCard diary={diary} events={data.events||{}} CATS={CATS} dark={dark} t={t} lang={lang} onNavigate={onNavigate}/>
     <TrendChart diary={diary} CATS={CATS} dark={dark} t={t} showInfoIcons={showInfoIcons}/>
     <p className="text-xs font-bold tracking-wider mb-4" style={{color:muted}}>{t.avgLast} {dates.length} {t.avgDays}</p>
     <div className="rounded-2xl p-5 mb-4" style={{background:card,border:`1px solid ${border}`}}>
@@ -2539,6 +2816,13 @@ function SettingsView({dark,setDark,lang,setLang,reminderSettings,setReminderSet
     </Section>
 
     <Section title={t.sectionReminders}>
+      <Row label={t.weekNumSetting} sub={t.weekNumSettingSub}
+        right={<button type="button" onClick={()=>{const s={...reminderSettings,weekNumbers:reminderSettings.weekNumbers===false?true:false};setReminderSettings(s);localStorage.setItem("perma_reminder",JSON.stringify(s));}}
+          className="w-12 h-6 rounded-full transition-all relative shrink-0"
+          style={{background:reminderSettings.weekNumbers!==false?"#3B82F6":dark?"#2D3F55":"#CBD5E1"}}>
+          <div className="w-5 h-5 rounded-full absolute top-0.5 transition-all"
+            style={{background:"#fff",left:reminderSettings.weekNumbers!==false?"calc(100% - 22px)":"2px"}}/>
+        </button>}/>
       <Row label={t.reminderTitle} sub={t.reminderSub}
         right={<DomToggle refVal={enabledRef}/>}/>
       <div className="px-4 py-3.5" style={{borderBottom:`1px solid ${dark?"#1E2A3B":"#F1F5F9"}`,opacity:0.99}}>
@@ -2610,13 +2894,18 @@ function SettingsView({dark,setDark,lang,setLang,reminderSettings,setReminderSet
       </div>
     </Section>
 
+    <button type="button" onClick={()=>{localStorage.removeItem("lumen_onboarded");localStorage.removeItem("lumen_name");localStorage.removeItem("lumen_last_welcome");if(typeof window!=="undefined"&&window.location)window.location.reload();}}
+      className="w-full py-2 text-xs mb-2"
+      style={{color:muted}}>
+      {lang==="fi"?"Nollaa onboarding (testaus)":"Reset onboarding (testing)"}
+    </button>
     <p className="text-xs text-center mt-2 mb-6" style={{color:muted,fontSize:"0.65rem"}}>Lumen Ascent · PERMA+4 · v1.0</p>
   </div>);
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function Sidebar({open,onClose,tab,setTab,dark,streak,t}){
-  const nav=[{id:"home",icon:"🏠",l:t.home},{id:"calendar",icon:"📅",l:t.calendar},{id:"diary",icon:"✍️",l:t.diary},{id:"stats",icon:"📊",l:t.stats},{id:"growth",icon:"🌱",l:t.growth},{id:"settings",icon:"⚙️",l:t.settings}];
+  const nav=[{id:"settings",icon:"⚙️",l:t.settings}];
   const bg=dark?"#1A2332":"#FFFFFF",border=dark?"#2D3F55":"#E8EEF4";
   const text=dark?"#E2E8F0":"#1E293B",muted="#94A3B8";
   return(<>
@@ -2628,7 +2917,7 @@ function Sidebar({open,onClose,tab,setTab,dark,streak,t}){
           <span className="text-2xl">{streak>=30?"🔥":streak>=14?"⚡":streak>=7?"✨":"🌱"}</span>
           <div><div className="font-black text-sm" style={{color:"#F59E0B"}}>{t.streakLabel(streak)}</div><div className="text-xs" style={{color:muted}}>{t.streakMsg(streak)}</div></div>
         </div>}
-        {nav.map(n=><button key={n.id} onClick={()=>{setTab(n.id);onClose();}} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl mb-2 text-left transition-all" style={{background:tab===n.id?"#3B82F618":"transparent",border:`1.5px solid ${tab===n.id?"#3B82F640":"transparent"}`,color:tab===n.id?"#3B82F6":text}}>
+        {nav.map(n=><button type="button" key={n.id} onClick={()=>{setTab(n.id);onClose();}} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl mb-2 text-left transition-all" style={{background:tab===n.id?"#3B82F618":"transparent",border:`1.5px solid ${tab===n.id?"#3B82F640":"transparent"}`,color:tab===n.id?"#3B82F6":text}}>
           <span className="text-xl">{n.icon}</span><span className="font-semibold text-sm">{n.l}</span>
           {tab===n.id&&<div className="ml-auto w-1.5 h-1.5 rounded-full" style={{background:"#3B82F6"}}/>}
         </button>)}
@@ -2639,10 +2928,88 @@ function Sidebar({open,onClose,tab,setTab,dark,streak,t}){
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
+
+// ── Bottom Nav Item with long-press for calendar ──────────────────────────────
+function BottomNavItem({item, isActive, dark, t, onPress, calView, onCalView}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const timerRef = useRef(null);
+  const bg = dark?"#1A2332":"#ffffff";
+  const border = dark?"#2D3F55":"#E8EEF4";
+  const text = dark?"#E2E8F0":"#1E293B";
+
+  const startLong = () => {
+    if(item.id!=="calendar") return;
+    timerRef.current = setTimeout(()=>setShowMenu(true), 400);
+  };
+  const cancelLong = () => clearTimeout(timerRef.current);
+  const handlePress = () => {
+    cancelLong();
+    if(!showMenu) onPress();
+  };
+
+  return(
+    <div style={{flex:1,position:"relative",display:"flex",justifyContent:"center"}}>
+      {item.id==="calendar"&&showMenu&&<>
+        <div onClick={()=>setShowMenu(false)} style={{position:"fixed",inset:0,zIndex:99}}/>
+        <div style={{
+          position:"absolute",bottom:"calc(100% + 8px)",left:"50%",
+          transform:"translateX(-50%)",
+          background:bg,border:`1px solid ${border}`,
+          borderRadius:12,overflow:"hidden",
+          boxShadow:"0 -4px 24px rgba(0,0,0,0.18)",
+          zIndex:100,minWidth:140
+        }}>
+          <button type="button" onClick={()=>{onCalView("week");setShowMenu(false);}} style={{
+            display:"block",width:"100%",padding:"12px 16px",
+            background:calView==="week"?"#3B82F615":"transparent",
+            border:"none",borderBottom:`1px solid ${border}`,
+            cursor:"pointer",textAlign:"left",
+            fontSize:"0.875rem",fontWeight:calView==="week"?700:400,
+            color:calView==="week"?"#3B82F6":text
+          }}>📅 {t.week||"Viikko"}</button>
+          <button type="button" onClick={()=>{onCalView("month");setShowMenu(false);}} style={{
+            display:"block",width:"100%",padding:"12px 16px",
+            background:calView==="month"?"#3B82F615":"transparent",
+            border:"none",cursor:"pointer",textAlign:"left",
+            fontSize:"0.875rem",fontWeight:calView==="month"?700:400,
+            color:calView==="month"?"#3B82F6":text
+          }}>🗓️ {t.month||"Kuukausi"}</button>
+        </div>
+      </>}
+      <button type="button"
+        onClick={handlePress}
+        onTouchStart={startLong}
+        onTouchEnd={cancelLong}
+        onTouchMove={cancelLong}
+        style={{
+          display:"flex",flexDirection:"column",
+          alignItems:"center",justifyContent:"center",
+          padding:"6px 8px 8px",background:"transparent",
+          border:"none",cursor:"pointer",position:"relative",
+          WebkitTapHighlightColor:"transparent"
+        }}>
+        {isActive&&<div style={{
+          position:"absolute",top:0,width:24,height:2.5,
+          borderRadius:"9999px",background:"#3B82F6"
+        }}/>}
+        <span style={{fontSize:16,marginBottom:1,lineHeight:1}}>{item.icon}</span>
+        <span style={{
+          fontSize:"0.55rem",fontWeight:isActive?700:500,
+          color:isActive?"#3B82F6":dark?"#4A5568":"#94A3B8"
+        }}>{item.label}</span>
+      </button>
+    </div>
+  );
+}
+
+
 export default function App(){
   const [dark,setDark]=useState(true);
   const [lang,setLang]=useState(()=>localStorage.getItem("perma_lang")||"fi");
   const [tab,setTab]=useState("home");
+  const [prevTab,setPrevTab]=useState("home");
+  const TABS_ORDER=["diary","calendar","home","stats","growth","settings"];
+  const setTabAnimated=(newTab)=>{setPrevTab(tab);setTab(newTab);};
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [onboarded,setOnboarded]=useState(()=>!!localStorage.getItem("lumen_onboarded"));
   const [userName,setUserName]=useState(()=>localStorage.getItem("lumen_name")||"");
@@ -2654,6 +3021,9 @@ export default function App(){
   const [data,setData]=useState(()=>load());
   const [confetti,setConfetti]=useState(false);
   const [showCrisis,setShowCrisis]=useState(false);
+  const [modalOpen,setModalOpen]=useState(false);
+  const [calView,setCalView]=useState("week");
+  const [jumpToDay,setJumpToDay]=useState(null);
   const crisisShownRef=useRef(false);
   const [showInfoIcons,setShowInfoIcons]=useState(()=>localStorage.getItem("perma_info")!=="false");
   const [reminderSettings,setReminderSettings]=useState(()=>{try{return JSON.parse(localStorage.getItem("perma_reminder")||'{"enabled":false,"hour":21,"minute":0}');}catch{return{enabled:false,hour:21,minute:0};}});
@@ -2667,7 +3037,7 @@ export default function App(){
   useEffect(()=>{localStorage.setItem("perma_info",String(showInfoIcons));},[showInfoIcons]);
   useEffect(()=>{
     if(notifTimer.current)clearTimeout(notifTimer.current);
-    if(reminderSettings.enabled&&Notification.permission==="granted")notifTimer.current=scheduleNotif(reminderSettings.hour,reminderSettings.minute,t);
+    if(reminderSettings.enabled&&typeof Notification!=="undefined"&&Notification.permission==="granted")notifTimer.current=scheduleNotif(reminderSettings.hour,reminderSettings.minute,t,()=>load());
     return()=>{if(notifTimer.current)clearTimeout(notifTimer.current);};
   },[reminderSettings]);
 
@@ -2684,14 +3054,23 @@ export default function App(){
 
   // Header-only swipe for tab navigation
   const headerSwipeStart=useRef(null);
+  const headerRef=useRef(null);
+  const [headerH,setHeaderH]=useState(56);
+  useEffect(()=>{
+    if(headerRef.current){
+      const h=headerRef.current.getBoundingClientRect().height;
+      setHeaderH(h||56);
+      document.documentElement.style.setProperty('--header-h', `${h||56}px`);
+    }
+  },[]);
 
   const onHeaderTouchStart=e=>{headerSwipeStart.current=e.touches[0].clientX;};
   const onHeaderTouchEnd=e=>{
     if(headerSwipeStart.current===null)return;
     const dx=e.changedTouches[0].clientX-headerSwipeStart.current;
     if(Math.abs(dx)>60){
-      if(dx<0){const i=TABS.indexOf(tab);if(i<TABS.length-1)setTab(TABS[i+1]);}
-      else{const i=TABS.indexOf(tab);if(i>0)setTab(TABS[i-1]);}
+      if(dx<0){const i=TABS.indexOf(tab);if(i<TABS.length-1)setTabAnimated(TABS[i+1]);}
+      else{const i=TABS.indexOf(tab);if(i>0)setTabAnimated(TABS[i-1]);}
     }
     headerSwipeStart.current=null;
   };
@@ -2701,7 +3080,7 @@ export default function App(){
   const tabIcons={home:"🏠",calendar:"📅",diary:"✍️",stats:"📊",growth:"🌱",settings:"⚙️"};
   const tabLabels={home:t.home,calendar:t.calendar,diary:t.diary,stats:t.stats,growth:t.growth,settings:t.settings};
 
-  return(<div className="min-h-screen" style={{background:bg,fontFamily:"'Inter',system-ui,sans-serif",color:text2}}>
+  return(<div className="min-h-screen" style={{"--bg-color":bg,background:bg,fontFamily:"'Inter',system-ui,sans-serif",color:text2}}>
     <style>{`
       *{box-sizing:border-box;}
       input[type=range]{-webkit-appearance:none;appearance:none;outline:none;}
@@ -2713,56 +3092,78 @@ export default function App(){
       ::-webkit-scrollbar{display:none;} body{margin:0;}
       select{-webkit-appearance:none;appearance:none;}
       select option{background:${dark?"#1A2332":"#ffffff"};color:${dark?"#E2E8F0":"#1E293B"};}
+      @keyframes slideInRight{from{opacity:0;transform:translateX(32px)}to{opacity:1;transform:translateX(0)}}
+      @keyframes slideInLeft{from{opacity:0;transform:translateX(-32px)}to{opacity:1;transform:translateX(0)}}
+      @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+      .tab-enter-right{animation:slideInRight 0.25s ease-out forwards}
+      .tab-enter-left{animation:slideInLeft 0.25s ease-out forwards}
+      .tab-enter-fade{animation:fadeIn 0.2s ease-out forwards}
     `}</style>
     <Confetti active={confetti}/>
     {!onboarded&&<OnboardingView dark={dark} t={t} CATS={CATS} onLang={(l)=>{setLang(l);localStorage.setItem("perma_lang",l);}} onComplete={(name)=>{localStorage.setItem("lumen_onboarded","1");if(name){localStorage.setItem("lumen_name",name);setUserName(name);}setOnboarded(true);setTab("home");}}/>}
     {onboarded&&showDailyWelcome&&<DailyWelcomeView dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onContinue={()=>{localStorage.setItem("lumen_last_welcome",new Date().toDateString());setShowDailyWelcome(false);setTab("home");}}/>}
     {showCrisis&&<CrisisModal dark={dark} t={t} onClose={()=>setShowCrisis(false)}/>}
-    {onboarded&&!showDailyWelcome&&<>
-<Sidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} tab={tab} setTab={setTabAnimated} dark={dark} streak={streak} t={t}/>
 
-    </>}{/* Header + content only shown after onboarding and daily welcome */}
+    {/* Header + content only shown after onboarding and daily welcome */}
     {onboarded&&!showDailyWelcome&&<>
-    {/* Header — swipe here to change tabs */}
-    <div className="fixed top-0 left-0 right-0 z-30" style={{background:headerBg,backdropFilter:"blur(14px)",borderBottom:`1px solid ${border}`}}
-      onTouchStart={onHeaderTouchStart} onTouchEnd={onHeaderTouchEnd}>
-      <div className="flex items-center justify-between px-4 max-w-md mx-auto" style={{paddingTop:"calc(0.75rem + env(safe-area-inset-top,0px))",paddingBottom:"0.75rem"}}>
-        <button onClick={()=>setSidebarOpen(true)} className="w-10 h-10 rounded-xl flex flex-col items-center justify-center gap-1.5" style={{background:dark?"#1E2A3B":"#FFFFFF",border:`1px solid ${border}`}}>
+    <Sidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} tab={tab} setTab={setTabAnimated} dark={dark} streak={streak} t={t}/>
+    {/* Header — top */}
+    <div ref={headerRef} className="fixed top-0 left-0 right-0 z-30" style={{display:modalOpen?"none":"block"}} style={{background:headerBg,backdropFilter:"blur(14px)",borderBottom:`1px solid ${border}`}}>
+      <div className="flex items-center justify-between px-4 max-w-md mx-auto" style={{paddingTop:"calc(0.4rem + env(safe-area-inset-top,0px))",paddingBottom:"0.4rem"}}>
+        <button type="button" onClick={()=>setSidebarOpen(true)} className="w-8 h-8 rounded-xl flex flex-col items-center justify-center gap-1" style={{background:dark?"#1E2A3B":"#FFFFFF",border:`1px solid ${border}`}}>
           <div className="w-4 h-0.5 rounded" style={{background:muted}}/><div className="w-4 h-0.5 rounded" style={{background:muted}}/><div className="w-4 h-0.5 rounded" style={{background:muted}}/>
         </button>
-        <div className="flex items-center gap-2">
-          {tab==="home"
-            ? <div className="flex flex-col items-center leading-tight">
-                <span className="font-black text-sm tracking-tight" style={{color:text2}}>Lumen Ascent</span>
-                <span style={{fontSize:"0.6rem",color:"#3B82F6",fontWeight:600,letterSpacing:"0.04em"}}>Align With Purpose</span>
-              </div>
-            : <><span className="text-lg">{tabIcons[tab]}</span>
-               <span className="font-bold text-sm" style={{color:text2}}>{tabLabels[tab]}</span></>
-          }
-          <StreakBadge streak={streak} t={t}/>
+        <div className="flex flex-col items-center leading-tight">
+          <span className="font-black text-sm tracking-tight" style={{color:text2}}>Lumen Ascent</span>
+          <span style={{fontSize:"0.6rem",color:"#3B82F6",fontWeight:600,letterSpacing:"0.04em"}}>Align With Purpose</span>
         </div>
-        <button type="button" onClick={()=>setDark(d=>!d)} className="w-10 h-10 rounded-xl flex items-center justify-center text-lg" style={{background:dark?"#1E2A3B":"#FFFFFF",border:`1px solid ${border}`}}>{dark?"☀️":"🌙"}</button>
+        <div className="w-8 h-8"/>
       </div>
     </div>
 
     {/* Content — each tab has its own persistent scroll container, never unmounted */}
-    {["home","calendar","diary","stats","growth","settings"].map(t2=>(
-      <div key={t2} style={{
-        position:"fixed", top:"calc(3.5rem + env(safe-area-inset-top,0px))",
-        left:0, right:0, bottom:0,
-        overflowY: "auto", WebkitOverflowScrolling:"touch",
-        display: tab===t2 ? "block" : "none",
-      }}>
-        <div className="px-4 pb-6 max-w-md mx-auto pt-4">
-          {t2==="home"&&<HomeView data={data} dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onNavigate={setTab}/>}
-          {t2==="calendar"&&<CalendarView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons}/>}
-          {t2==="diary"&&<DiaryView data={data} onData={handleData} dark={dark} onSaved={handleSaved} t={t} CATS={CATS} showInfoIcons={showInfoIcons}/>}
-          {t2==="stats"&&<StatsView data={data} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons}/>}
-          {t2==="growth"&&<GrowthView data={data} dark={dark} t={t} CATS={CATS} lang={lang}/>}
-          {t2==="settings"&&<SettingsView dark={dark} setDark={setDark} lang={lang} setLang={setLang} reminderSettings={reminderSettings} setReminderSettings={setReminderSettings} data={data} CATS={CATS} t={t} showInfoIcons={showInfoIcons} setShowInfoIcons={setShowInfoIcons}/>}
-        </div>
+    <div style={{
+      position:"fixed",
+      top:"var(--header-h, 56px)",
+      left:0, right:0,
+      bottom:"calc(3.5rem + env(safe-area-inset-bottom,0px))",
+      overflowY:"auto", WebkitOverflowScrolling:"touch",
+    }}>
+      <div className="px-4 max-w-md mx-auto" style={{paddingTop:"1rem",paddingBottom:"1.5rem"}}>
+        {tab==="home"&&<HomeView data={data} dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onNavigate={setTabAnimated}/>}
+        {tab==="calendar"&&<CalendarView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} onModalChange={setModalOpen} lang={lang} calView={calView} setCalView={setCalView} timeGrid={reminderSettings.timeGrid!==false} weekNumbers={reminderSettings.weekNumbers!==false} jumpToDay={jumpToDay} onJumped={()=>setJumpToDay(null)}/>}
+        {tab==="diary"&&<DiaryView data={data} onData={handleData} dark={dark} onSaved={handleSaved} t={t} CATS={CATS} showInfoIcons={showInfoIcons}/>}
+        {tab==="stats"&&<StatsView data={data} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} lang={lang} onNavigate={(day)=>{setCalView("week");setJumpToDay(day);setTabAnimated("calendar");}}/>}
+        {tab==="growth"&&<GrowthView data={data} dark={dark} t={t} CATS={CATS} lang={lang}/>}
+        {tab==="settings"&&<SettingsView dark={dark} setDark={setDark} lang={lang} setLang={setLang} reminderSettings={reminderSettings} setReminderSettings={setReminderSettings} data={data} CATS={CATS} t={t} showInfoIcons={showInfoIcons} setShowInfoIcons={setShowInfoIcons}/>}
       </div>
-    ))}
+    </div>
+
+    {/* Bottom Navigation */}
+    <div style={{
+      position:"fixed", bottom:0, left:0, right:0, zIndex:30,
+      background:dark?"rgba(15,24,38,0.96)":"rgba(240,244,248,0.96)", backdropFilter:"blur(14px)",
+      borderTop:`1px solid ${border}`,
+      paddingBottom:"env(safe-area-inset-bottom,0px)",
+      display:"flex"
+    }}>
+      {[
+        {id:"diary",icon:"✍️",label:t.diary},
+        {id:"calendar",icon:"📅",label:t.calendar},
+        {id:"home",icon:"🏠",label:t.home},
+        {id:"stats",icon:"📊",label:t.stats},
+        {id:"growth",icon:"🌱",label:t.growth},
+      ].map(item=>{
+        const isActive=tab===item.id;
+        return(
+          <BottomNavItem key={item.id} item={item} isActive={isActive}
+            dark={dark} t={t}
+            onPress={()=>setTabAnimated(item.id)}
+            calView={calView} onCalView={(v)=>{setCalView(v);setTabAnimated("calendar");}}
+          />
+        );
+      })}
+    </div>
     </>}
   </div>);
 }
