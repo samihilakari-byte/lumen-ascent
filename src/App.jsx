@@ -69,6 +69,9 @@ const T = {
     myProfile:"OMA PROFIILINI",
     weekTheme:"VIIKON TEEMA",
     weekThemeSub:"Tällä viikolla keskitymme",
+    weekThemeChange:"Vaihda teema",
+    weekThemeAuto:"Automaattinen",
+    weekThemeManual:"Oma valinta",
     reflectQ:"Pohdi tätä",
     insightOfDay:"Oivallus",
     strongAreas:"Vahvuutesi", developAreas:"Kehitysalueesi",
@@ -90,7 +93,7 @@ const T = {
     homeTodayInsight:"TÄMÄN PÄIVÄN OIVALLUS", homeQuickLinks:"PIKAVALIKKO",
     gratitudeInline:"KOLME KIITOLLISUUTTA",
     gratitudePlaceholderInline:(n)=>`${n}. Mistä olet tänään kiitollinen?`,
-    postAssessTitle:"Mitä haluaisit nostaa?", postAssessSub:"Valitse yksi osa-alue johon haluat keskittyä",
+    postAssessTitle:"Mihin haluaisit keskittyä?", postAssessSub:"Valitse yksi osa-alue johon haluat keskittyä",
     postAssessSteps:"Anna 1-3 konkreettista tekoa", postAssessStepPlaceholder:"Mitä voit tehdä tänään tai tällä viikolla?",
     postAssessSave:"Tallenna suunnitelma", postAssessSkip:"Ohita tällä kertaa", postAssessSaved:"Suunnitelma tallennettu!",
     home:"Koti",
@@ -204,6 +207,9 @@ const T = {
     myProfile:"MY PROFILE",
     weekTheme:"WEEK THEME",
     weekThemeSub:"This week we focus on",
+    weekThemeChange:"Change theme",
+    weekThemeAuto:"Automatic",
+    weekThemeManual:"My choice",
     reflectQ:"Reflect on this",
     insightOfDay:"Insight",
     strongAreas:"Your strengths", developAreas:"Areas to develop",
@@ -225,7 +231,7 @@ const T = {
     homeTodayInsight:"TODAY'S INSIGHT", homeQuickLinks:"QUICK ACCESS",
     gratitudeInline:"THREE GRATITUDES",
     gratitudePlaceholderInline:(n)=>`${n}. What are you grateful for today?`,
-    postAssessTitle:"What would you like to lift?", postAssessSub:"Choose one area to focus on",
+    postAssessTitle:"What would you like to focus on?", postAssessSub:"Choose one area to focus on",
     postAssessSteps:"Give 1-3 concrete steps", postAssessStepPlaceholder:"What can you do today or this week?",
     postAssessSave:"Save plan", postAssessSkip:"Skip for now", postAssessSaved:"Plan saved!",
     home:"Home",
@@ -300,6 +306,14 @@ const CATS_DATA = {
 
 const toDateStr=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const todayStr=()=>toDateStr(new Date());
+
+const getInstallDays = () => {
+  try {
+    let d = localStorage.getItem("lumen_install_date");
+    if(!d){ d = new Date().toISOString(); localStorage.setItem("lumen_install_date", d); }
+    return Math.floor((new Date() - new Date(d)) / 86400000);
+  } catch(e){ return 0; }
+};
 const daysInMonth=(y,m)=>new Date(y,m+1,0).getDate();
 const firstWeekday=(y,m)=>{const d=new Date(y,m,1).getDay();return d===0?6:d-1;};
 const addDays=(s,n)=>{const d=new Date(s);d.setDate(d.getDate()+n);return toDateStr(d);};
@@ -1284,7 +1298,7 @@ function GratitudeView({data, onData, dark, t, onSaved}) {
 }
 
 // ── Action Plan View ──────────────────────────────────────────────────────────
-function ActionPlanView({data, onData, dark, t, CATS}) {
+function ActionPlanView({data, onData, dark, t, CATS, lang}) {
   const diary = data.diary||{};
   const plans = data.actionPlans||[];
   const challenges = data.challenges||[];
@@ -1424,47 +1438,56 @@ function ActionPlanView({data, onData, dark, t, CATS}) {
         <p className="text-xs font-bold tracking-wider mb-3" style={{color:muted}}>{t.weakestAreas}</p>
 
         {/* Category selector */}
-        {avgScores.slice(0,5).map(c=>(
-          <button key={c.id} onClick={()=>setSelCat(c)}
-            className="w-full flex items-center gap-3 p-3 rounded-xl mb-2 text-left"
+        {avgScores.map((c,idx)=>(<div key={c.id}>
+          <button type="button" onClick={()=>{setSelCat(selCat?.id===c.id?null:c);setSteps(["",""]);setTarget(7);}}
+            className="w-full flex items-center gap-3 p-3 rounded-xl mb-1 text-left"
             style={{background:selCat?.id===c.id?c.color+"20":bg,border:`1.5px solid ${selCat?.id===c.id?c.color:border}`}}>
             <span className="text-lg">{c.emoji}</span>
             <div className="flex-1">
               <div className="text-sm font-semibold" style={{color:text}}>{c.label}</div>
+              {idx<3&&<div className="text-xs" style={{color:c.color}}>{lang==="fi"?"⭐ Suositus":"⭐ Recommended"}</div>}
               <div className="h-1.5 rounded-full mt-1" style={{background:dark?"#2D3F55":"#E8EEF4"}}>
                 <div className="h-full rounded-full" style={{width:`${(c.avg/10)*100}%`,background:c.color}}/>
               </div>
             </div>
-            <div className="text-sm font-black" style={{color:c.color}}>{c.avg.toFixed(1)}</div>
+            <div className="flex items-center gap-1">
+              <div className="text-sm font-black" style={{color:c.color}}>{c.avg.toFixed(1)}</div>
+              <span style={{color:selCat?.id===c.id?c.color:muted,fontSize:"0.75rem"}}>{selCat?.id===c.id?"▲":"▼"}</span>
+            </div>
           </button>
-        ))}
-
-        {selCat&&<>
-          <div className="mt-4 mb-4">
-            <p className="text-xs font-bold mb-2" style={{color:muted}}>{t.targetLabel}: <span style={{color:selCat.color}}>{target}/10</span></p>
-            <div className="grid grid-cols-10 gap-1">
+          {selCat?.id===c.id&&<div className="rounded-xl p-3 mb-2" style={{background:c.color+"10",border:`1px solid ${c.color}30`}}>
+            <p className="text-xs font-bold mb-2" style={{color:muted}}>{t.targetLabel}: <span style={{color:c.color}}>{target}/10</span></p>
+            <div className="grid grid-cols-10 gap-1 mb-3">
               {[1,2,3,4,5,6,7,8,9,10].map(n=>(
-                <button key={n} onClick={()=>setTarget(n)}
-                  className="h-8 rounded-lg text-xs font-bold"
-                  style={{background:n===target?selCat.color:n>Math.round(selCat.avg)?selCat.color+"25":bg,
-                  color:n===target?"#fff":n>Math.round(selCat.avg)?selCat.color:muted,
-                  border:`1px solid ${n===target?selCat.color:"transparent"}`}}>{n}</button>
+                <button key={n} type="button" onClick={()=>setTarget(n)}
+                  className="h-7 rounded-lg text-xs font-bold"
+                  style={{background:n===target?c.color:n>Math.round(c.avg)?c.color+"25":bg,
+                  color:n===target?"#fff":n>Math.round(c.avg)?c.color:muted,
+                  border:`1px solid ${n===target?c.color:"transparent"}`}}>{n}</button>
               ))}
             </div>
-          </div>
-
-          <p className="text-xs font-bold mb-2" style={{color:muted}}>{t.actionSteps}</p>
-          {steps.map((step,i)=>(
-            <input key={i} value={step} onChange={e=>{const n=[...steps];n[i]=e.target.value;setSteps(n);}}
-              placeholder={t.actionPlaceholder}
-              className="w-full px-4 py-2.5 rounded-xl text-sm mb-2 outline-none"
-              style={{background:bg,border:`1px solid ${border}`,color:text}}/>
-          ))}
-          {steps.length<3&&<button onClick={()=>setSteps([...steps,""])}
-            className="text-xs mb-4 px-3 py-1.5 rounded-xl" style={{color:"#3B82F6",background:"#3B82F615"}}>
-            {t.addAction}
-          </button>}
-        </>}
+            <p className="text-xs font-bold mb-2" style={{color:muted}}>{t.actionSteps}</p>
+            {steps.map((step,i)=>(
+              <input key={i} value={step} onChange={e=>{const n=[...steps];n[i]=e.target.value;setSteps(n);}}
+                placeholder={t.actionPlaceholder}
+                className="w-full px-3 py-2 rounded-xl text-sm mb-2 outline-none"
+                style={{background:bg,border:`1px solid ${border}`,color:text}}/>
+            ))}
+            {steps.length<3&&<button type="button" onClick={()=>setSteps([...steps,""])}
+              className="text-xs mb-2 px-3 py-1.5 rounded-xl" style={{color:c.color,background:c.color+"15"}}>
+              {t.addAction}
+            </button>}
+            <button type="button" onClick={saveplan}
+              className="w-full py-2.5 rounded-xl font-bold text-sm mt-1"
+              style={{background:planSaved?"#10B981":c.color,color:"#fff"}}>
+              {planSaved?t.actionSaved:t.saveActionPlan}
+            </button>
+          </div>}
+        </div>))}
+        <button type="button" onClick={()=>{setCreating(false);setSelCat(null);setSteps(["",""]);}}
+          className="w-full py-2.5 rounded-2xl text-sm mt-2" style={{background:bg,color:muted}}>
+          {t.cancelAction||t.deleteCancelled||"Peruuta"}
+        </button>
 
         <div className="flex gap-2 mt-2">
           <button onClick={()=>{setCreating(false);setSelCat(null);setSteps(["",""]);}}
@@ -1642,6 +1665,7 @@ function DiaryDatePicker({selDate, onSelect, dark, t, diary, onSearch, showSearc
 function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
   const [selDate,setSelDate]=useState(todayStr());
   const [diaryTab,setDiaryTab]=useState("write");
+  const diarySwipeX=useRef(0);
   const [search,setSearch]=useState("");
   const [showSearch,setShowSearch]=useState(false);
   const diary=data.diary||{},day=diary[selDate]||{},scores=day.scores||{},text=day.text||"";
@@ -1685,6 +1709,7 @@ function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
       ))}
     </div>
 
+    {/* Diary content */}
     {diaryTab==="write"&&<>
       {/* Integrated gratitude */}
       <div className="rounded-2xl p-5 mb-3" style={{background:card,border:`1px solid #F59E0B30`}}>
@@ -1756,43 +1781,49 @@ function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
         </div>
         <div className="px-5" style={{paddingBottom:"6rem"}}>
           <p className="text-xs mb-4" style={{color:muted}}>{t.postAssessSub}</p>
-          {/* Show bottom 3 scoring areas */}
-          {[...CATS].map(c=>({...c,score:scores[c.id]||5})).sort((a,b)=>a.score-b.score).slice(0,3).map(c=>(
-            <button key={c.id} type="button" onClick={()=>setPostCat(postCat?.id===c.id?null:c)}
-              className="w-full flex items-center gap-3 p-3 rounded-xl mb-2 text-left"
+          {/* All 9 categories — accordion style */}
+          {[...CATS].map(c=>({...c,score:scores[c.id]||5})).sort((a,b)=>a.score-b.score).map((c,idx)=>(<div key={c.id}>
+            <button type="button" onClick={()=>{setPostCat(postCat?.id===c.id?null:c);setPostSteps(["",""]);}}
+              className="w-full flex items-center gap-3 p-3 rounded-xl mb-1 text-left"
               style={{background:postCat?.id===c.id?c.color+"20":bg,border:`1.5px solid ${postCat?.id===c.id?c.color:border}`}}>
               <span className="text-xl">{c.emoji}</span>
-              <div className="flex-1"><div className="text-sm font-semibold" style={{color:textC}}>{c.label}</div></div>
-              <div className="text-sm font-black" style={{color:c.color}}>{c.score}/10</div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold" style={{color:textC}}>{c.label}</div>
+                {idx<3&&<div className="text-xs" style={{color:c.color}}>{lang==="fi"?"⭐ Suositus":"⭐ Recommended"}</div>}
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="text-sm font-black" style={{color:c.color}}>{c.score}/10</div>
+                <span style={{color:postCat?.id===c.id?c.color:muted,fontSize:"0.75rem"}}>{postCat?.id===c.id?"▲":"▼"}</span>
+              </div>
             </button>
-          ))}
-          {postCat&&<>
-            <p className="text-xs font-bold mb-2 mt-4" style={{color:muted}}>{t.postAssessSteps}</p>
-            {postSteps.map((s,i)=>(
-              <input key={i} value={s} onChange={e=>{const n=[...postSteps];n[i]=e.target.value;setPostSteps(n);}}
-                placeholder={t.postAssessStepPlaceholder}
-                className="w-full px-4 py-2.5 rounded-xl text-sm mb-2 outline-none"
-                style={{background:bg,border:`1px solid ${border}`,color:textC}}/>
-            ))}
-            {postSteps.length<3&&<button type="button" onClick={()=>setPostSteps([...postSteps,""])}
-              className="text-xs px-3 py-1.5 rounded-xl mb-3"
-              style={{color:"#3B82F6",background:"#3B82F615"}}>{t.addAction||"+ Lisää teko"}</button>}
-          </>}
-          <div className="flex gap-2 mt-2">
-            <button type="button" onClick={()=>setShowPostAssess(false)}
-              className="px-4 py-3 rounded-2xl text-sm" style={{background:bg,color:muted}}>{t.postAssessSkip}</button>
-            <button type="button" onClick={()=>{
-              if(!postCat||!postSteps.filter(s=>s.trim()).length){setShowPostAssess(false);return;}
-              const plan={id:Date.now().toString(),catId:postCat.id,catLabel:postCat.label,catColor:postCat.color,catEmoji:postCat.emoji,
-                current:scores[postCat.id]||5,target:Math.min(10,(scores[postCat.id]||5)+2),
-                steps:postSteps.filter(s=>s.trim()).map(s=>({text:s,done:false})),createdAt:selDate,completed:false};
-              onData({...data,actionPlans:[...(data.actionPlans||[]).filter(p=>p.completed),plan]});
-              setPostSaved(true);setTimeout(()=>{setPostSaved(false);setShowPostAssess(false);setPostCat(null);setPostSteps(["",""]);},1500);
-            }} className="flex-1 py-3 rounded-2xl font-bold text-sm"
-              style={{background:postSaved?"#10B981":"#3B82F6",color:"#fff"}}>
-              {postSaved?t.postAssessSaved:t.postAssessSave}
-            </button>
-          </div>
+            {postCat?.id===c.id&&<div className="rounded-xl p-3 mb-2" style={{background:c.color+"10",border:`1px solid ${c.color}30`}}>
+              <p className="text-xs font-bold mb-2" style={{color:muted}}>{t.postAssessSteps}</p>
+              {postSteps.map((s,i)=>(
+                <input key={i} value={s} onChange={e=>{const n=[...postSteps];n[i]=e.target.value;setPostSteps(n);}}
+                  placeholder={t.postAssessStepPlaceholder}
+                  className="w-full px-3 py-2 rounded-xl text-sm mb-2 outline-none"
+                  style={{background:bg,border:`1px solid ${border}`,color:textC}}/>
+              ))}
+              {postSteps.length<3&&<button type="button" onClick={()=>setPostSteps([...postSteps,""])}
+                className="text-xs px-3 py-1.5 rounded-xl mb-2"
+                style={{color:c.color,background:c.color+"15"}}>{t.addAction||"+ Lisää teko"}</button>}
+              <button type="button" onClick={()=>{
+                if(!postSteps.filter(s=>s.trim()).length) return;
+                const plan={id:Date.now().toString(),catId:c.id,catLabel:c.label,catColor:c.color,catEmoji:c.emoji,
+                  current:scores[c.id]||5,target:Math.min(10,(scores[c.id]||5)+2),
+                  steps:postSteps.filter(s=>s.trim()).map(s=>({text:s,done:false})),createdAt:selDate,completed:false};
+                onData({...data,actionPlans:[...(data.actionPlans||[]).filter(p=>p.completed),plan]});
+                setPostSaved(true);setTimeout(()=>{setPostSaved(false);setShowPostAssess(false);setPostCat(null);setPostSteps(["",""]);},1500);
+              }} className="w-full py-2.5 rounded-xl font-bold text-sm"
+                style={{background:postSaved?"#10B981":c.color,color:"#fff"}}>
+                {postSaved?t.postAssessSaved:t.postAssessSave}
+              </button>
+            </div>}
+          </div>))}
+          <button type="button" onClick={()=>setShowPostAssess(false)}
+            className="w-full py-2.5 rounded-2xl text-sm mt-2" style={{background:bg,color:muted}}>
+            {t.postAssessSkip}
+          </button>
         </div>
       </div>
     </div>}
@@ -1886,10 +1917,20 @@ const INSIGHTS = {
 };
 
 // Get today's insight based on day of year
-const getTodaysInsight = (lang) => {
-  const items = INSIGHTS[lang] || INSIGHTS.fi;
-  const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(),0,0)) / 86400000);
-  return items[dayOfYear % items.length];
+const getTodaysInsight = (lang, savedInsights=[]) => {
+  const all = INSIGHTS[lang] || INSIGHTS.fi;
+  if(!all?.length) return null;
+  const savedQuotes = new Set((savedInsights||[]).map(s=>s.quote));
+  const total = all.length;
+  const multiplier = total < 30 ? 1.3 : total < 100 ? 1.6 : 2.0;
+  const pool = [];
+  all.forEach(ins => {
+    const w = Math.round((savedQuotes.has(ins.quote) ? multiplier : 1) * 10);
+    for(let i=0;i<w;i++) pool.push(ins);
+  });
+  const today = new Date();
+  const seed = today.getFullYear()*10000+(today.getMonth()+1)*100+today.getDate();
+  return pool[seed % pool.length];
 };
 
 // Get question for today (cycles through multiple questions per insight)
@@ -1901,7 +1942,66 @@ const getTodaysQuestion = (insight) => {
 };
 
 // ── Growth View ───────────────────────────────────────────────────────────────
-function GrowthView({data, dark, t, CATS, lang}) {
+
+// ── Insight Action Buttons (♥ / ○ / hide) ────────────────────────────────────
+function InsightActions({quote, data, onData, size="sm"}) {
+  const saved = (data.savedInsights||[]).find(s=>s.quote===quote);
+  const hidden = (data.hiddenInsights||[]).includes(quote);
+  const [confirmHide, setConfirmHide] = useState(false);
+  const muted = "#94A3B8";
+  const fs = size==="sm" ? "1rem" : "1.25rem";
+
+  const toggleSave = () => {
+    if(saved){
+      onData({...data,savedInsights:(data.savedInsights||[]).filter(s=>s.quote!==quote)});
+    } else {
+      const newSaved=[...(data.savedInsights||[]),
+        {id:Date.now().toString(),quote,source:"app",savedAt:new Date().toISOString()}];
+      onData({...data,savedInsights:newSaved});
+    }
+  };
+
+  if(confirmHide) return(
+    <div style={{display:"flex",alignItems:"center",gap:"0.25rem"}}>
+      <span style={{fontSize:"0.65rem",color:muted}}>Piilota?</span>
+      <button type="button" onClick={()=>{
+        onData({...data,hiddenInsights:[...(data.hiddenInsights||[]),quote]});
+        setConfirmHide(false);
+      }} style={{fontSize:"0.7rem",padding:"2px 8px",borderRadius:6,
+        background:"#F59E0B20",color:"#F59E0B",border:"1px solid #F59E0B40",cursor:"pointer"}}>Kyllä</button>
+      <button type="button" onClick={()=>setConfirmHide(false)}
+        style={{fontSize:"0.7rem",padding:"2px 8px",borderRadius:6,
+        background:"transparent",color:muted,border:"none",cursor:"pointer"}}>Ei</button>
+    </div>
+  );
+
+  const showHint = getInstallDays() < 10;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:"0.25rem",flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:"0.5rem"}}>
+        <button type="button" onClick={toggleSave} style={{
+          background:"transparent",border:"none",cursor:"pointer",
+          fontSize:fs,color:saved?"#EF4444":muted,lineHeight:1
+        }}>{saved?"♥":"♡"}</button>
+        {!hidden&&<button type="button" onClick={()=>setConfirmHide(true)} style={{
+          background:"transparent",border:"none",cursor:"pointer",
+          fontSize:fs,color:muted,lineHeight:1,opacity:0.6
+        }}>○</button>}
+        {hidden&&<button type="button" onClick={()=>onData({...data,
+          hiddenInsights:(data.hiddenInsights||[]).filter(q=>q!==quote)})} style={{
+          background:"transparent",border:"none",cursor:"pointer",
+          fontSize:fs,color:"#F59E0B",lineHeight:1
+        }}>🚫</button>}
+      </div>
+      {showHint&&<div style={{fontSize:"0.6rem",color:muted,textAlign:"right",lineHeight:1.3}}>
+        {saved?"♥ tallennettu":"♡ tallenna"} · {hidden?"🚫 piilotettu":"○ piilota"}
+      </div>}
+    </div>
+  );
+}
+
+function GrowthView({data, onData, dark, t, CATS, lang}) {
   const [openCatInfo, setOpenCatInfo] = useState(null);
   const [expandedCat, setExpandedCat] = useState(null);
   const diary = data.diary || {};
@@ -1911,7 +2011,8 @@ function GrowthView({data, dark, t, CATS, lang}) {
   const text=dark?"#E2E8F0":"#1E293B", muted="#94A3B8", sub=dark?"#1E2A3B":"#F8FAFC";
 
   // Today's insight
-  const insight = getTodaysInsight(lang);
+  const rawInsight = getTodaysInsight(lang, data.savedInsights);
+  const insight = rawInsight && !(data.hiddenInsights||[]).includes(rawInsight.quote) ? rawInsight : null;
   const question = insight ? getTodaysQuestion(insight) : "";
   const insightCat = insight?.catId ? CATS.find(c=>c.id===insight.catId) : null;
 
@@ -1926,7 +2027,33 @@ function GrowthView({data, dark, t, CATS, lang}) {
 
   // Week theme — cycles through CATS by week number
   const weekNum = Math.floor((new Date() - new Date(new Date().getFullYear(),0,0)) / (86400000*7));
-  const weekCat = CATS[weekNum % CATS.length];
+
+  // Smart auto week theme: 60% development, 40% strength
+  const getAutoWeekCat = () => {
+    const catAvgMap = {};
+    const diary = data.diary || {};
+    Object.values(diary).forEach(d=>{
+      if(d.scores) CATS.forEach(c=>{
+        if(!catAvgMap[c.id]) catAvgMap[c.id]={sum:0,count:0};
+        catAvgMap[c.id].sum+=(d.scores[c.id]||5);
+        catAvgMap[c.id].count++;
+      });
+    });
+    const ranked = [...CATS].sort((a,b)=>{
+      const aAvg=catAvgMap[a.id]?catAvgMap[a.id].sum/catAvgMap[a.id].count:5;
+      const bAvg=catAvgMap[b.id]?catAvgMap[b.id].sum/catAvgMap[b.id].count:5;
+      return aAvg-bAvg;
+    });
+    // 60% pick from bottom 5 (development), 40% from top 4 (strength)
+    const seed = weekNum * 7 + 3;
+    const useDevelopment = (seed % 10) < 6;
+    const pool = useDevelopment ? ranked.slice(0,5) : ranked.slice(-4);
+    return pool[seed % pool.length];
+  };
+
+  const manualTheme = data.weekTheme;
+  const weekCat = manualTheme ? (CATS.find(c=>c.id===manualTheme)||getAutoWeekCat()) : getAutoWeekCat();
+  const [showThemePicker, setShowThemePicker] = useState(false);
 
   return(<div className="pb-6">
 
@@ -1934,9 +2061,12 @@ function GrowthView({data, dark, t, CATS, lang}) {
     <div className="rounded-2xl p-5 mb-4"
       style={{background:insightCat?`linear-gradient(135deg,${insightCat.color}18,${insightCat.color}08)`:dark?"linear-gradient(135deg,#1E2A3B,#162032)":"linear-gradient(135deg,#EFF6FF,#F0FDF4)",
       border:`1px solid ${insightCat?insightCat.color+"30":border}`}}>
-      <div className="flex items-center gap-2 mb-3">
-        {insightCat&&<span className="text-xl">{insightCat.emoji}</span>}
-        <p className="text-xs font-bold tracking-wider" style={{color:insightCat?.color||muted}}>{t.todaysInsight}</p>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          {insightCat&&<span className="text-xl">{insightCat.emoji}</span>}
+          <p className="text-xs font-bold tracking-wider" style={{color:insightCat?.color||muted}}>{t.todaysInsight}</p>
+        </div>
+        {insight&&<InsightActions quote={insight.quote} data={data} onData={onData}/>}
       </div>
       <p className="text-sm leading-relaxed mb-4" style={{color:text,fontStyle:"italic"}}>
         "{insight?.quote}"
@@ -1948,17 +2078,45 @@ function GrowthView({data, dark, t, CATS, lang}) {
     </div>
 
     {/* ── Week Theme ── */}
-    <div className="rounded-2xl p-5 mb-4" style={{background:card,border:`1px solid ${weekCat.color}40`}}>
-      <p className="text-xs font-bold tracking-wider mb-1" style={{color:muted}}>{t.weekTheme}</p>
-      <p className="text-xs mb-3" style={{color:muted}}>{t.weekThemeSub}</p>
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl"
+    <div className="rounded-2xl p-4 mb-4" style={{background:card,border:`1px solid ${weekCat.color}40`}}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-bold tracking-wider" style={{color:muted}}>{t.weekTheme}</p>
+        <button type="button" onClick={()=>setShowThemePicker(p=>!p)}
+          className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+          style={{background:weekCat.color+"20",color:weekCat.color}}>
+          {showThemePicker?"✕":(t.weekThemeChange||"Vaihda")}
+        </button>
+      </div>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0"
           style={{background:weekCat.color+"20"}}>{weekCat.emoji}</div>
         <div>
           <div className="font-bold text-base" style={{color:weekCat.color}}>{weekCat.label}</div>
-          <div className="text-xs mt-0.5" style={{color:muted}}>{weekCat.section}</div>
+          <div className="text-xs mt-0.5" style={{color:muted}}>
+            {manualTheme ? (lang==="fi"?"Oma valintasi":"Your choice") : (lang==="fi"?"Automaattinen":"Automatic")}
+          </div>
         </div>
       </div>
+      {showThemePicker&&<>
+        <div className="grid grid-cols-3 gap-1.5 mt-3 pt-3" style={{borderTop:`1px solid ${weekCat.color}20`}}>
+          {CATS.map(c=>(
+            <button key={c.id} type="button"
+              onClick={()=>{onData({...data,weekTheme:c.id});setShowThemePicker(false);}}
+              className="flex flex-col items-center p-2 rounded-xl text-center"
+              style={{background:weekCat.id===c.id?c.color+"30":sub,
+                border:`1.5px solid ${weekCat.id===c.id?c.color:border}`}}>
+              <span className="text-lg mb-0.5">{c.emoji}</span>
+              <span className="text-xs font-semibold leading-tight" style={{color:weekCat.id===c.id?c.color:text}}>{c.label}</span>
+            </button>
+          ))}
+        </div>
+        {manualTheme&&<button type="button"
+          onClick={()=>{onData({...data,weekTheme:null});setShowThemePicker(false);}}
+          className="w-full py-2 mt-2 rounded-xl text-xs font-semibold"
+          style={{background:sub,color:muted}}>
+          {lang==="fi"?"↩ Palauta automaattinen":"↩ Reset to automatic"}
+        </button>}
+      </>}
     </div>
 
     {/* ── Area Map ── */}
@@ -2015,17 +2173,24 @@ function GrowthView({data, dark, t, CATS, lang}) {
               {expandedCat.info}
             </p>
             {/* Reflection questions */}
-            {catInsights.length>0&&<div style={{
-              borderRadius:"0.875rem",padding:"0.875rem",marginBottom:"1rem",
-              background:dark?"rgba(0,0,0,0.25)":"rgba(0,0,0,0.04)"
-            }}>
-              <p style={{fontSize:"0.75rem",fontWeight:700,color:expandedCat.color,
-                margin:"0 0 0.5rem 0"}}>🤔 {t.reflectQ}</p>
-              {catInsights[0].questions.map((q,i)=>(
-                <p key={i} style={{fontSize:"0.875rem",lineHeight:1.5,
-                  color:dark?"#E2E8F0":"#1E293B",margin:i>0?"0.5rem 0 0 0":"0"}}>{q}</p>
-              ))}
-            </div>}
+            {catInsights.map((ins,idx)=>(
+              <div key={idx} style={{
+                borderRadius:"0.875rem",padding:"0.875rem",marginBottom:"0.75rem",
+                background:dark?"rgba(0,0,0,0.25)":"rgba(0,0,0,0.04)"
+              }}>
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:"0.5rem",marginBottom:"0.5rem"}}>
+                  <p style={{fontSize:"0.8rem",fontStyle:"italic",lineHeight:1.5,
+                    color:dark?"#E2E8F0":"#1E293B",margin:0,flex:1}}>"{ins.quote}"</p>
+                  <InsightActions quote={ins.quote} data={data} onData={onData}/>
+                </div>
+                <p style={{fontSize:"0.75rem",fontWeight:700,color:expandedCat.color,
+                  margin:"0 0 0.375rem 0"}}>🤔 {t.reflectQ}</p>
+                {ins.questions.map((q,i)=>(
+                  <p key={i} style={{fontSize:"0.8125rem",lineHeight:1.5,
+                    color:dark?"#94A3B8":"#64748B",margin:i>0?"0.375rem 0 0 0":"0"}}>{q}</p>
+                ))}
+              </div>
+            ))}
             {/* Close button */}
             <button type="button" onClick={()=>setExpandedCat(null)} style={{
               display:"block",width:"100%",padding:"0.875rem",
@@ -2138,6 +2303,172 @@ function GrowthView({data, dark, t, CATS, lang}) {
         </div>
       </div>
     )}
+
+    {/* My Insights section */}
+    <MyInsightsView data={data} onData={onData} dark={dark} t={t} CATS={CATS} lang={lang}/>
+
+  </div>);
+}
+
+
+// ── My Insights View ──────────────────────────────────────────────────────────
+function MyInsightsView({data, onData, dark, t, CATS, lang}) {
+  const [insightTab, setInsightTab] = useState("saved");
+  const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [quote, setQuote] = useState("");
+  const [question, setQuestion] = useState("");
+  const [selCats, setSelCats] = useState([]);
+  const [saved, setSaved] = useState(false);
+
+  const card = dark?"#1A2332":"#ffffff";
+  const border = dark?"#2D3F55":"#E8EEF4";
+  const text = dark?"#E2E8F0":"#1E293B";
+  const muted = "#94A3B8";
+  const bg = dark?"#0F1826":"#F0F4F8";
+  const sub = dark?"#1E2A3B":"#F8FAFC";
+
+  const allInsights = data.savedInsights||[];
+  const hiddenInsights = data.hiddenInsights||[];
+  const userInsights = allInsights.filter(i=>i.source==="user");
+  const appInsights = allInsights.filter(i=>i.source==="app"||!i.source);
+
+  const reset = () => {setQuote("");setQuestion("");setSelCats([]);setEditId(null);setShowAdd(false);setSaved(false);};
+
+  const saveInsight = () => {
+    if(!quote.trim()) return;
+    const newIns = {
+      id: editId||Date.now().toString(),
+      quote: quote.trim(),
+      question: question.trim(),
+      catIds: selCats.map(c=>c.id),
+      catId: selCats[0]?.id||null,
+      source: "user",
+      savedAt: new Date().toISOString()
+    };
+    const existing = allInsights.filter(i=>i.id!==newIns.id);
+    onData({...data, savedInsights:[...existing, newIns]});
+    setSaved(true);
+    setTimeout(reset, 1500);
+  };
+
+  const startEdit = (ins) => {
+    setQuote(ins.quote);
+    setQuestion(ins.question||"");
+    setSelCats((ins.catIds||[ins.catId]).filter(Boolean).map(id=>CATS.find(c=>c.id===id)).filter(Boolean));
+    setEditId(ins.id);
+    setShowAdd(true);
+  };
+
+  const deleteInsight = (id) => onData({...data, savedInsights: allInsights.filter(i=>i.id!==id)});
+
+  return(<div className="mb-4">
+    <div className="flex items-center justify-between mb-3">
+      <p className="text-xs font-bold tracking-wider" style={{color:muted}}>
+        {lang==="fi"?"OMAT OIVALLUKSET":"MY INSIGHTS"}
+      </p>
+      <button type="button" onClick={()=>setShowAdd(true)}
+        className="text-xs px-3 py-1.5 rounded-xl font-bold"
+        style={{background:"#3B82F6",color:"#fff"}}>
+        + {lang==="fi"?"Lisää":"Add"}
+      </button>
+    </div>
+
+    {/* Sub tabs */}
+    <div className="flex gap-1 p-1 rounded-xl mb-3" style={{background:sub}}>
+      {["saved","hidden"].map(tab=>(
+        <button key={tab} type="button" onClick={()=>setInsightTab(tab)}
+          className="flex-1 py-1.5 rounded-lg text-xs font-semibold"
+          style={{background:insightTab===tab?card:"transparent",color:insightTab===tab?text:muted}}>
+          {tab==="saved"
+            ? (lang==="fi"?"Tallennetut":"Saved")
+            : <span>{lang==="fi"?"Piilotetut":"Hidden"}{hiddenInsights.length>0&&<span className="ml-1 px-1.5 rounded-full" style={{background:"#F59E0B20",color:"#F59E0B"}}>{hiddenInsights.length}</span>}</span>
+          }
+        </button>
+      ))}
+    </div>
+
+    {/* Add/Edit form */}
+    {insightTab==="saved"&&showAdd&&<div className="rounded-2xl p-4 mb-3" style={{background:card,border:`1px solid ${border}`}}>
+      <p className="text-xs font-bold mb-2" style={{color:muted}}>{lang==="fi"?"LAINAUS TAI AJATUS":"QUOTE OR THOUGHT"}</p>
+      <textarea value={quote} onChange={e=>setQuote(e.target.value)} rows={3}
+        placeholder={lang==="fi"?"Kirjoita lainaus tai ajatus...":"Write a quote or thought..."}
+        className="w-full bg-transparent outline-none text-sm resize-none mb-3"
+        style={{color:text,lineHeight:1.7,borderBottom:`1px solid ${border}`,paddingBottom:"0.5rem"}}/>
+      <p className="text-xs font-bold mb-2" style={{color:muted}}>{lang==="fi"?"REFLEKTIOKYSYMYS (valinnainen)":"REFLECTION QUESTION (optional)"}</p>
+      <input value={question} onChange={e=>setQuestion(e.target.value)}
+        placeholder={lang==="fi"?"Lisää reflektiokysymys...":"Add a reflection question..."}
+        className="w-full bg-transparent outline-none text-sm mb-3"
+        style={{color:text,borderBottom:`1px solid ${border}`,paddingBottom:"0.5rem"}}/>
+      <p className="text-xs font-bold mb-2" style={{color:muted}}>{lang==="fi"?"PERMA+4 ALUEET":"PERMA+4 AREAS"}</p>
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {CATS.map(c=>{
+          const isSel=selCats.some(s=>s.id===c.id);
+          return(<button key={c.id} type="button" onClick={()=>setSelCats(isSel?selCats.filter(s=>s.id!==c.id):[...selCats,c])}
+            className="text-xs px-2 py-1 rounded-full font-semibold"
+            style={{background:isSel?c.color+"30":sub,color:isSel?c.color:muted,border:`1px solid ${isSel?c.color:border}`}}>
+            {c.emoji} {c.label}
+          </button>);
+        })}
+      </div>
+      <div className="flex gap-2">
+        <button type="button" onClick={reset} className="px-4 py-2.5 rounded-xl text-sm" style={{background:sub,color:muted}}>
+          {lang==="fi"?"Peruuta":"Cancel"}
+        </button>
+        <button type="button" onClick={saveInsight} className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+          style={{background:saved?"#10B981":"#3B82F6",color:"#fff"}}>
+          {saved?(lang==="fi"?"Tallennettu!":"Saved!"):(editId?(lang==="fi"?"Päivitä":"Update"):(lang==="fi"?"Tallenna":"Save"))}
+        </button>
+      </div>
+    </div>}
+
+    {/* Saved tab */}
+    {insightTab==="saved"&&<>
+      {!allInsights.length&&!showAdd&&<div className="text-center py-8 rounded-2xl" style={{background:sub,border:`1px dashed ${border}`}}>
+        <div className="text-2xl mb-2">💭</div>
+        <p className="text-xs" style={{color:muted}}>{lang==="fi"?"Ei tallennettuja oivalluksia vielä.":"No saved insights yet."}</p>
+      </div>}
+      {[...appInsights, ...userInsights].map(ins=>{
+        const cats=(ins.catIds||[ins.catId]).filter(Boolean).map(id=>CATS.find(c=>c.id===id)).filter(Boolean);
+        const isUser=ins.source==="user";
+        return(<div key={ins.id} className="rounded-2xl p-4 mb-3"
+          style={{background:cats[0]?cats[0].color+"15":card,border:`1px solid ${cats[0]?cats[0].color+"30":border}`}}>
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1 flex-wrap">
+              {cats.map(c=><span key={c.id}>{c.emoji}</span>)}
+              <span className="text-xs px-1.5 py-0.5 rounded-full" style={{background:isUser?"#8B5CF620":"#3B82F620",color:isUser?"#8B5CF6":"#3B82F6"}}>
+                {isUser?"✍️":"📱"}
+              </span>
+            </div>
+            <div className="flex gap-1.5 shrink-0">
+              {isUser?<>
+                <button type="button" onClick={()=>startEdit(ins)} className="text-xs px-2 py-1 rounded-lg" style={{background:sub,color:muted}}>{lang==="fi"?"Muokkaa":"Edit"}</button>
+                <button type="button" onClick={()=>deleteInsight(ins.id)} className="text-xs px-2 py-1 rounded-lg" style={{background:"#EF444415",color:"#EF4444"}}>{lang==="fi"?"Poista":"Delete"}</button>
+              </>:<InsightActions quote={ins.quote} data={data} onData={onData}/>}
+            </div>
+          </div>
+          <p className="text-sm italic leading-relaxed mb-1" style={{color:text}}>"{ins.quote}"</p>
+          {ins.question&&<p className="text-xs mt-1" style={{color:muted}}>🤔 {ins.question}</p>}
+        </div>);
+      })}
+    </>}
+
+    {/* Hidden tab */}
+    {insightTab==="hidden"&&<>
+      {!hiddenInsights.length&&<div className="text-center py-8 rounded-2xl" style={{background:sub,border:`1px dashed ${border}`}}>
+        <p className="text-xs" style={{color:muted}}>{lang==="fi"?"Ei piilotettuja oivalluksia.":"No hidden insights."}</p>
+      </div>}
+      {hiddenInsights.map(q=>(
+        <div key={q} className="rounded-2xl p-4 mb-3" style={{background:card,border:`1px solid ${border}`,opacity:0.7}}>
+          <p className="text-sm italic leading-relaxed mb-3" style={{color:text}}>"{q.length>100?q.slice(0,100)+"...":q}"</p>
+          <button type="button" onClick={()=>onData({...data,hiddenInsights:hiddenInsights.filter(h=>h!==q)})}
+            className="text-xs px-3 py-1.5 rounded-xl font-semibold"
+            style={{background:"#10B98120",color:"#10B981"}}>
+            {lang==="fi"?"↩ Tuo takaisin":"↩ Restore"}
+          </button>
+        </div>
+      ))}
+    </>}
   </div>);
 }
 
@@ -2292,7 +2623,7 @@ function OnboardingView({dark, t, CATS, onComplete, onLang}) {
           background:card,color:text,marginBottom:"0.75rem",
           boxSizing:"border-box",minHeight:"56px",alignItems:"center",gap:"0.875rem"
         }}>
-          <span style={{fontSize:"1.5rem"}}>🇫🇮</span>
+          <span style={{fontSize:"1rem",fontWeight:900,color:"#E2E8F0"}}>FI</span>
           <div><div style={{fontWeight:700}}>Suomi</div><div style={{fontSize:"0.8125rem",color:muted,fontWeight:400}}>Finnish</div></div>
         </button>
         <button type="button" onClick={()=>{onLang("en");next();}} style={{
@@ -2301,7 +2632,7 @@ function OnboardingView({dark, t, CATS, onComplete, onLang}) {
           background:card,color:text,marginBottom:"2rem",
           boxSizing:"border-box",minHeight:"56px",alignItems:"center",gap:"0.875rem"
         }}>
-          <span style={{fontSize:"1.5rem"}}>🇬🇧</span>
+          <span style={{fontSize:"1rem",fontWeight:900,color:"#E2E8F0"}}>EN</span>
           <div><div style={{fontWeight:700}}>English</div><div style={{fontSize:"0.8125rem",color:muted,fontWeight:400}}>Englanti</div></div>
         </button>
         <div style={{display:"flex",justifyContent:"center",gap:"0.5rem"}}>
@@ -2446,12 +2777,12 @@ function OnboardingView({dark, t, CATS, onComplete, onLang}) {
 }
 
 // ── Daily Welcome View ────────────────────────────────────────────────────────
-function DailyWelcomeView({dark, t, CATS, lang, userName, onContinue}) {
+function DailyWelcomeView({dark, t, CATS, lang, userName, onContinue, data, onData}) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? t.greetingMorning(userName)
     : hour < 18 ? t.greetingDay(userName)
     : t.greetingEvening(userName);
-  const insight = getTodaysInsight(lang);
+  const insight = getTodaysInsight(lang, data?.savedInsights);
   const insightCat = insight?.catId ? CATS.find(c=>c.id===insight.catId) : null;
   const question = insight ? getTodaysQuestion(insight) : "";
 
@@ -2483,13 +2814,16 @@ function DailyWelcomeView({dark, t, CATS, lang, userName, onContinue}) {
             background:insightCat?insightCat.color+"18":card,
             border:`1.5px solid ${insightCat?insightCat.color+"40":border}`
           }}>
-            <div style={{display:"flex",alignItems:"center",gap:"0.5rem",
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
               marginBottom:"0.75rem"}}>
-              {insightCat&&<span style={{fontSize:"1.125rem"}}>{insightCat.emoji}</span>}
-              <span style={{fontSize:"0.6875rem",fontWeight:700,
-                letterSpacing:"0.05em",color:insightCat?.color||muted}}>
-                {t.homeTodayInsight}
-              </span>
+              <div style={{display:"flex",alignItems:"center",gap:"0.5rem"}}>
+                {insightCat&&<span style={{fontSize:"1.125rem"}}>{insightCat.emoji}</span>}
+                <span style={{fontSize:"0.6875rem",fontWeight:700,
+                  letterSpacing:"0.05em",color:insightCat?.color||muted}}>
+                  {t.homeTodayInsight}
+                </span>
+              </div>
+              {data&&onData&&<InsightActions quote={insight.quote} data={data} onData={onData}/>}
             </div>
             <p style={{fontSize:"0.875rem",lineHeight:1.65,
               color:text,fontStyle:"italic",margin:"0 0 1rem 0"}}>
@@ -2528,7 +2862,7 @@ function DailyWelcomeView({dark, t, CATS, lang, userName, onContinue}) {
 }
 
 // ── Home View ─────────────────────────────────────────────────────────────────
-function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
+function HomeView({data, onData, dark, t, CATS, lang, userName, onNavigate}) {
   const diary = data.diary || {};
   const today = todayStr();
   const todayEntry = diary[today];
@@ -2538,7 +2872,7 @@ function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? t.greetingMorning(userName) : hour < 18 ? t.greetingDay(userName) : t.greetingEvening(userName);
 
-  const insight = getTodaysInsight(lang);
+  const insight = getTodaysInsight(lang, data?.savedInsights);
   const insightCat = insight?.catId ? CATS.find(c=>c.id===insight.catId) : null;
 
   const card = dark?"#1A2332":"#FFFFFF", border = dark?"#2D3F55":"#E8EEF4";
@@ -2559,6 +2893,28 @@ function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
         <span className="text-sm font-semibold" style={{color:"#F59E0B"}}>{t.streakLabel(streak)}</span>
       </div>}
     </div>
+
+    {/* Favorite insight card */}
+    {(data.savedInsights||[]).length>0&&(()=>{
+      const favs=data.savedInsights||[];
+      const today=new Date();
+      const seed=today.getFullYear()*10000+(today.getMonth()+1)*100+today.getDate()+1;
+      const fav=favs[seed%favs.length];
+      if(!fav) return null;
+      const cat=fav.catId?CATS.find(c=>c.id===fav.catId):null;
+      return(<div className="rounded-2xl p-4 mb-4"
+        style={{background:cat?cat.color+"15":card,border:`1px solid ${cat?cat.color+"30":border}`}}>
+        <div className="flex items-center gap-2 mb-2">
+          {cat&&<span className="text-base">{cat.emoji}</span>}
+          <p className="text-xs font-bold tracking-wider" style={{color:cat?.color||"#F59E0B"}}>
+            {lang==="fi"?"⭐ SUOSIKKISI TÄNÄÄN":"⭐ YOUR FAVORITE TODAY"}
+          </p>
+        </div>
+        <p className="text-xs italic leading-relaxed" style={{color:text}}>
+          "{fav.quote.length>120?fav.quote.slice(0,120)+"...":fav.quote}"
+        </p>
+      </div>);
+    })()}
 
     {/* Main CTA — only shown when day NOT done */}
     {!diaryDone&&<div className="rounded-2xl p-5 mb-4"
@@ -2589,6 +2945,7 @@ function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
       const pct = total>0?(done/total)*100:0;
 
       const toggleStep = (stepIdx) => {
+        if(!onData) return;
         const updated = (data.actionPlans||[]).map(p=>{
           if(p.id!==active.id) return p;
           const ns=[...p.steps];
@@ -2669,9 +3026,12 @@ function HomeView({data, dark, t, CATS, lang, userName, onNavigate}) {
     {/* Today's insight — below quick links */}
     {insight&&<div className="rounded-2xl p-4 mb-4"
       style={{background:insightCat?insightCat.color+"15":sub,border:`1px solid ${insightCat?insightCat.color+"30":border}`}}>
-      <div className="flex items-center gap-2 mb-2">
-        {insightCat&&<span>{insightCat.emoji}</span>}
-        <p className="text-xs font-bold tracking-wider" style={{color:insightCat?.color||muted}}>{t.homeTodayInsight}</p>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          {insightCat&&<span>{insightCat.emoji}</span>}
+          <p className="text-xs font-bold tracking-wider" style={{color:insightCat?.color||muted}}>{t.homeTodayInsight}</p>
+        </div>
+        <InsightActions quote={insight.quote} data={data} onData={onData}/>
       </div>
       <p className="text-xs leading-relaxed italic mb-2" style={{color:text}}>
         "{insight.quote}"
@@ -2802,7 +3162,7 @@ function SettingsView({dark,setDark,lang,setLang,reminderSettings,setReminderSet
       <div className="px-4 py-3.5" style={{borderBottom:`1px solid ${dark?"#1E2A3B":"#F1F5F9"}`}}>
         <div className="text-sm font-medium mb-3" style={{color:textC}}>{t.language}</div>
         <div className="flex gap-2">
-          {[{id:"fi",l:"🇫🇮 Suomi"},{id:"en",l:"🇬🇧 English"}].map(l=>(
+          {[{id:"fi",l:"FI Suomi"},{id:"en",l:"EN English"}].map(l=>(
             <button type="button" key={l.id} onClick={()=>setLang(l.id)}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
               style={{background:lang===l.id?"#3B82F620":bg,border:`1.5px solid ${lang===l.id?"#3B82F6":border}`,color:lang===l.id?"#3B82F6":muted}}>
@@ -3101,7 +3461,7 @@ export default function App(){
     `}</style>
     <Confetti active={confetti}/>
     {!onboarded&&<OnboardingView dark={dark} t={t} CATS={CATS} onLang={(l)=>{setLang(l);localStorage.setItem("perma_lang",l);}} onComplete={(name)=>{localStorage.setItem("lumen_onboarded","1");if(name){localStorage.setItem("lumen_name",name);setUserName(name);}setOnboarded(true);setTab("home");}}/>}
-    {onboarded&&showDailyWelcome&&<DailyWelcomeView dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onContinue={()=>{localStorage.setItem("lumen_last_welcome",new Date().toDateString());setShowDailyWelcome(false);setTab("home");}}/>}
+    {onboarded&&showDailyWelcome&&<DailyWelcomeView dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} data={data} onData={handleData} onContinue={()=>{localStorage.setItem("lumen_last_welcome",new Date().toDateString());setShowDailyWelcome(false);setTab("home");}}/>}
     {showCrisis&&<CrisisModal dark={dark} t={t} onClose={()=>setShowCrisis(false)}/>}
 
     {/* Header + content only shown after onboarding and daily welcome */}
@@ -3130,11 +3490,11 @@ export default function App(){
       overflowY:"auto", WebkitOverflowScrolling:"touch",
     }}>
       <div className="px-4 max-w-md mx-auto" style={{paddingTop:"1rem",paddingBottom:"1.5rem"}}>
-        {tab==="home"&&<HomeView data={data} dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onNavigate={setTabAnimated}/>}
+        {tab==="home"&&<HomeView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onNavigate={setTabAnimated}/>}
         {tab==="calendar"&&<CalendarView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} onModalChange={setModalOpen} lang={lang} calView={calView} setCalView={setCalView} timeGrid={reminderSettings.timeGrid!==false} weekNumbers={reminderSettings.weekNumbers!==false} jumpToDay={jumpToDay} onJumped={()=>setJumpToDay(null)}/>}
         {tab==="diary"&&<DiaryView data={data} onData={handleData} dark={dark} onSaved={handleSaved} t={t} CATS={CATS} showInfoIcons={showInfoIcons}/>}
         {tab==="stats"&&<StatsView data={data} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} lang={lang} onNavigate={(day)=>{setCalView("week");setJumpToDay(day);setTabAnimated("calendar");}}/>}
-        {tab==="growth"&&<GrowthView data={data} dark={dark} t={t} CATS={CATS} lang={lang}/>}
+        {tab==="growth"&&<GrowthView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang}/>}
         {tab==="settings"&&<SettingsView dark={dark} setDark={setDark} lang={lang} setLang={setLang} reminderSettings={reminderSettings} setReminderSettings={setReminderSettings} data={data} CATS={CATS} t={t} showInfoIcons={showInfoIcons} setShowInfoIcons={setShowInfoIcons}/>}
       </div>
     </div>
