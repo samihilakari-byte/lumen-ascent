@@ -48,6 +48,7 @@ const T = {
     libraryUse:"Käytä",
     sectionAppearance:"ULKOASU", sectionReminders:"MUISTUTUKSET", sectionData:"DATA",
     weekNumSetting:"Viikkonumerot kalenterissa", weekNumSettingSub:"Näyttää viikkonumerot kuukausinäkymässä",
+    showAppInsights:"Näytä sovelluksen oivallukset", showAppInsightsSub:"Piilota jos haluat nähdä vain omat oivalluksesi",
     themeLabel:(d)=>d?"Tumma tila":"Vaalea tila", themeSub:(d)=>d?"Dark mode":"Light mode",
     savedSettings:"✓ Tallennettu!", diaryEntries:"päiväkirjamerkintää", eventsCount:"tapahtumaa",
     inAppReminder:"Muistutus aktivoitu sovelluksessa",
@@ -186,6 +187,7 @@ const T = {
     libraryUse:"Use",
     sectionAppearance:"APPEARANCE", sectionReminders:"REMINDERS", sectionData:"DATA",
     weekNumSetting:"Week numbers in calendar", weekNumSettingSub:"Shows week numbers in month view",
+    showAppInsights:"Show app insights", showAppInsightsSub:"Disable to see only your own insights",
     themeLabel:(d)=>d?"Dark mode":"Light mode", themeSub:(d)=>d?"Dark":"Light",
     savedSettings:"✓ Saved!", diaryEntries:"journal entries", eventsCount:"events",
     inAppReminder:"Reminder activated in app",
@@ -1298,7 +1300,7 @@ function GratitudeView({data, onData, dark, t, onSaved}) {
 }
 
 // ── Action Plan View ──────────────────────────────────────────────────────────
-function ActionPlanView({data, onData, dark, t, CATS, lang}) {
+function ActionPlanView({data, onData, dark, t, CATS, lang, onNavigate}) {
   const diary = data.diary||{};
   const plans = data.actionPlans||[];
   const challenges = data.challenges||[];
@@ -1333,7 +1335,7 @@ function ActionPlanView({data, onData, dark, t, CATS, lang}) {
     };
     onData({...data, actionPlans:[...plans.filter(p=>p.completed), plan]});
     setCreating(false); setSelCat(null); setSteps(["",""]); setTarget(7);
-    setPlanSaved(true); setTimeout(()=>setPlanSaved(false),2000);
+    setPlanSaved(true); setTimeout(()=>{setPlanSaved(false);if(onNavigate){onNavigate("home", t.actionSaved);setTimeout(()=>{window.scrollTo({top:0,behavior:"smooth"});document.documentElement.scrollTop=0;document.body.scrollTop=0;if(mainRef?.current)mainRef.current.scrollTop=0;},150);}},2000);
   };
 
   const toggleStep = (planId, stepIdx) => {
@@ -1662,7 +1664,7 @@ function DiaryDatePicker({selDate, onSelect, dark, t, diary, onSearch, showSearc
   </div>);
 }
 
-function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
+function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons,lang,onNavigate}){
   const [selDate,setSelDate]=useState(todayStr());
   const [diaryTab,setDiaryTab]=useState("write");
   const diarySwipeX=useRef(0);
@@ -1769,7 +1771,7 @@ function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
       </button>}
     </>}
 
-    {diaryTab==="action"&&<ActionPlanView data={data} onData={onData} dark={dark} t={t} CATS={CATS}/>}
+    {diaryTab==="action"&&<ActionPlanView data={data} onData={onData} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} lang={lang} onNavigate={onNavigate}/>}
     {diaryTab==="library"&&<DiaryLibrary diary={diary} CATS={CATS} dark={dark} t={t}/>}
 
     {/* Post-assessment modal */}
@@ -1813,7 +1815,7 @@ function DiaryView({data,onData,dark,onSaved,t,CATS,showInfoIcons}){
                   current:scores[c.id]||5,target:Math.min(10,(scores[c.id]||5)+2),
                   steps:postSteps.filter(s=>s.trim()).map(s=>({text:s,done:false})),createdAt:selDate,completed:false};
                 onData({...data,actionPlans:[...(data.actionPlans||[]).filter(p=>p.completed),plan]});
-                setPostSaved(true);setTimeout(()=>{setPostSaved(false);setShowPostAssess(false);setPostCat(null);setPostSteps(["",""]);},1500);
+                setPostSaved(true);setTimeout(()=>{setPostSaved(false);setShowPostAssess(false);setPostCat(null);setPostSteps(["",""]);if(onNavigate){onNavigate("home", t.actionSaved);setTimeout(()=>{window.scrollTo({top:0,behavior:"smooth"});document.documentElement.scrollTop=0;document.body.scrollTop=0;if(mainRef?.current)mainRef.current.scrollTop=0;},150);}},2000);
               }} className="w-full py-2.5 rounded-xl font-bold text-sm"
                 style={{background:postSaved?"#10B981":c.color,color:"#fff"}}>
                 {postSaved?t.postAssessSaved:t.postAssessSave}
@@ -1997,6 +1999,26 @@ function InsightActions({quote, data, onData, size="sm"}) {
       {showHint&&<div style={{fontSize:"0.6rem",color:muted,textAlign:"right",lineHeight:1.3}}>
         {saved?"♥ tallennettu":"♡ tallenna"} · {hidden?"🚫 piilotettu":"○ piilota"}
       </div>}
+    </div>
+  );
+}
+
+
+// ── Toast notification ────────────────────────────────────────────────────────
+function Toast({message, visible, onDismiss}) {
+  if(!visible) return null;
+  return(
+    <div style={{
+      position:"fixed", top:"5rem", left:"50%", transform:"translateX(-50%)",
+      zIndex:200, background:"#10B981", color:"#fff",
+      padding:"0.875rem 1.5rem", borderRadius:"1rem",
+      fontSize:"0.9375rem", fontWeight:700,
+      boxShadow:"0 4px 20px rgba(16,185,129,0.4)",
+      display:"flex", alignItems:"center", gap:"0.75rem",
+      animation:"fadeIn 0.2s ease-out", cursor:"pointer"
+    }} onClick={onDismiss}>
+      <span>{message}</span>
+      <span style={{fontSize:"1.1rem", opacity:0.8}}>×</span>
     </div>
   );
 }
@@ -2304,9 +2326,276 @@ function GrowthView({data, onData, dark, t, CATS, lang}) {
       </div>
     )}
 
-    {/* My Insights section */}
-    <MyInsightsView data={data} onData={onData} dark={dark} t={t} CATS={CATS} lang={lang}/>
+  </div>);
+}
 
+
+// ── Library View ──────────────────────────────────────────────────────────────
+function LibraryView({data, onData, dark, t, CATS, lang}) {
+  const [libTab, setLibTab] = useState("app");
+  const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [quote, setQuote] = useState("");
+  const [question, setQuestion] = useState("");
+  const [selCats, setSelCats] = useState([]);
+  const [saved, setSaved] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState(null);
+
+  const card = dark?"#1A2332":"#ffffff";
+  const border = dark?"#2D3F55":"#E8EEF4";
+  const text = dark?"#E2E8F0":"#1E293B";
+  const muted = "#94A3B8";
+  const bg = dark?"#0F1826":"#F0F4F8";
+  const sub = dark?"#1E2A3B":"#F8FAFC";
+
+  const allInsights = data.savedInsights||[];
+  const hiddenInsights = data.hiddenInsights||[];
+  const userInsights = allInsights.filter(i=>i.source==="user");
+  const appInsights = allInsights.filter(i=>i.source==="app"||!i.source);
+
+  // All app insights from INSIGHTS constant
+  const allAppInsights = (INSIGHTS[lang]||INSIGHTS.fi||[]);
+  const filteredApp = allAppInsights.filter(i=>{
+    const matchSearch = !search || i.quote.toLowerCase().includes(search.toLowerCase());
+    const matchCat = !filterCat || i.catId===filterCat;
+    return matchSearch && matchCat;
+  });
+
+  const reset = () => {setQuote("");setQuestion("");setSelCats([]);setEditId(null);setShowAdd(false);setSaved(false);};
+
+  const saveInsight = () => {
+    if(!quote.trim()) return;
+    const newIns = {
+      id: editId||Date.now().toString(),
+      quote: quote.trim(),
+      question: question.trim(),
+      catIds: selCats.map(c=>c.id),
+      catId: selCats[0]?.id||null,
+      source: "user",
+      savedAt: new Date().toISOString()
+    };
+    const existing = allInsights.filter(i=>i.id!==newIns.id);
+    onData({...data, savedInsights:[...existing, newIns]});
+    setSaved(true);
+    setTimeout(reset, 1500);
+  };
+
+  const startEdit = (ins) => {
+    setQuote(ins.quote);
+    setQuestion(ins.question||"");
+    setSelCats((ins.catIds||[ins.catId]).filter(Boolean).map(id=>CATS.find(c=>c.id===id)).filter(Boolean));
+    setEditId(ins.id);
+    setShowAdd(true);
+    setLibTab("own");
+  };
+
+  const deleteInsight = (id) => onData({...data, savedInsights: allInsights.filter(i=>i.id!==id)});
+
+  return(<div className="pb-24 px-4 pt-2">
+    <h2 className="font-black text-lg mb-4" style={{color:text}}>
+      {lang==="fi"?"📚 Kirjasto":"📚 Library"}
+    </h2>
+
+    {/* Tabs */}
+    <div className="flex gap-1 p-1 rounded-2xl mb-4" style={{background:sub}}>
+      {[
+        {id:"app",l:lang==="fi"?"📱 Sovelluksen":"📱 App"},
+        {id:"own",l:lang==="fi"?"✍️ Omat":"✍️ Own"},
+        {id:"hidden",l:lang==="fi"?"🚫 Piilotetut":"🚫 Hidden"},
+      ].map(tab=>(
+        <button key={tab.id} type="button" onClick={()=>{setLibTab(tab.id);setFilterCat(null);}}
+          className="flex-1 py-2 rounded-xl text-xs font-semibold"
+          style={{background:libTab===tab.id?card:"transparent",
+            color:libTab===tab.id?text:muted,
+            boxShadow:libTab===tab.id?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>
+          {tab.l}
+          {tab.id==="hidden"&&hiddenInsights.length>0&&
+            <span className="ml-1 px-1.5 rounded-full text-xs" style={{background:"#F59E0B20",color:"#F59E0B"}}>
+              {hiddenInsights.length}
+            </span>}
+        </button>
+      ))}
+    </div>
+
+    {/* Search bar for app insights */}
+    {libTab==="app"&&<>
+      <div className="mb-3">
+        <input value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder={lang==="fi"?"Hae lainauksia...":"Search insights..."}
+          className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+          style={{background:card,border:`1px solid ${border}`,color:text}}/>
+      </div>
+      <div style={{display:"flex",gap:"0.375rem",overflowX:"auto",paddingBottom:"0.5rem",
+        marginBottom:"0.75rem",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+        <button type="button" onClick={()=>setFilterCat(null)}
+          style={{flexShrink:0,fontSize:"0.75rem",padding:"0.375rem 0.875rem",
+            borderRadius:"9999px",fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",
+            background:!filterCat?"#3B82F6":sub,color:!filterCat?"#fff":muted,
+            border:`1px solid ${!filterCat?"#3B82F6":border}`}}>
+          {lang==="fi"?"Kaikki":"All"}
+        </button>
+        {CATS.map(c=>(
+          <button key={c.id} type="button" onClick={()=>setFilterCat(filterCat===c.id?null:c.id)}
+            style={{flexShrink:0,fontSize:"0.75rem",padding:"0.375rem 0.875rem",
+              borderRadius:"9999px",fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",
+              background:filterCat===c.id?c.color+"30":sub,
+              color:filterCat===c.id?c.color:muted,
+              border:`1px solid ${filterCat===c.id?c.color:border}`}}>
+            {c.emoji} {c.label}
+          </button>
+        ))}
+      </div>
+    </>}
+
+    {/* App insights tab */}
+    {libTab==="app"&&<div>
+      {filteredApp.map((ins,idx)=>{
+        const cat = CATS.find(c=>c.id===ins.catId);
+        const isSaved = allInsights.find(s=>s.quote===ins.quote);
+        const isHidden = hiddenInsights.includes(ins.quote);
+        if(isHidden) return null;
+        return(<div key={idx} className="rounded-2xl p-4 mb-3"
+          style={{background:cat?cat.color+"15":card,border:`1px solid ${cat?cat.color+"30":border}`}}>
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1">
+              {cat&&<span className="text-sm">{cat.emoji}</span>}
+              {cat&&<span className="text-xs font-semibold" style={{color:cat.color}}>{cat.label}</span>}
+            </div>
+            <InsightActions quote={ins.quote} data={data} onData={onData}/>
+          </div>
+          <p className="text-sm italic leading-relaxed mb-1" style={{color:text}}>"{ins.quote}"</p>
+          {ins.question&&<p className="text-xs mt-1" style={{color:muted}}>🤔 {ins.question}</p>}
+        </div>);
+      })}
+      {filteredApp.filter(i=>!hiddenInsights.includes(i.quote)).length===0&&
+        <p className="text-center text-sm py-8" style={{color:muted}}>
+          {lang==="fi"?"Ei tuloksia":"No results"}
+        </p>}
+    </div>}
+
+    {/* Own insights tab */}
+    {libTab==="own"&&<div>
+      <div style={{display:"flex",gap:"0.375rem",overflowX:"auto",paddingBottom:"0.5rem",
+        marginBottom:"0.75rem",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
+        <button type="button" onClick={()=>setFilterCat(null)}
+          style={{flexShrink:0,fontSize:"0.75rem",padding:"0.375rem 0.875rem",
+            borderRadius:"9999px",fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",
+            background:!filterCat?"#8B5CF6":sub,color:!filterCat?"#fff":muted,
+            border:`1px solid ${!filterCat?"#8B5CF6":border}`}}>
+          {lang==="fi"?"Kaikki":"All"}
+        </button>
+        {CATS.filter(c=>userInsights.some(i=>(i.catIds||[i.catId]).includes(c.id))).map(c=>(
+          <button key={c.id} type="button" onClick={()=>setFilterCat(filterCat===c.id?null:c.id)}
+            style={{flexShrink:0,fontSize:"0.75rem",padding:"0.375rem 0.875rem",
+              borderRadius:"9999px",fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",
+              background:filterCat===c.id?c.color+"30":sub,
+              color:filterCat===c.id?c.color:muted,
+              border:`1px solid ${filterCat===c.id?c.color:border}`}}>
+            {c.emoji} {c.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={()=>setShowAdd(true)}
+        className="w-full py-3 rounded-2xl text-sm font-bold mb-4"
+        style={{background:"#3B82F6",color:"#fff"}}>
+        + {lang==="fi"?"Lisää oma oivallus":"Add your own insight"}
+      </button>
+
+      {showAdd&&<div className="rounded-2xl p-4 mb-4" style={{background:card,border:`1px solid ${border}`}}>
+        <p className="text-xs font-bold mb-2" style={{color:muted}}>{lang==="fi"?"LAINAUS TAI AJATUS":"QUOTE OR THOUGHT"}</p>
+        <textarea value={quote} onChange={e=>setQuote(e.target.value)} rows={3}
+          placeholder={lang==="fi"?"Kirjoita lainaus tai ajatus...":"Write a quote or thought..."}
+          className="w-full bg-transparent outline-none text-sm resize-none mb-3"
+          style={{color:text,lineHeight:1.7,borderBottom:`1px solid ${border}`,paddingBottom:"0.5rem"}}/>
+        <p className="text-xs font-bold mb-2" style={{color:muted}}>{lang==="fi"?"REFLEKTIOKYSYMYS (valinnainen)":"REFLECTION QUESTION (optional)"}</p>
+        <input value={question} onChange={e=>setQuestion(e.target.value)}
+          placeholder={lang==="fi"?"Lisää reflektiokysymys...":"Add a reflection question..."}
+          className="w-full bg-transparent outline-none text-sm mb-3"
+          style={{color:text,borderBottom:`1px solid ${border}`,paddingBottom:"0.5rem"}}/>
+        <p className="text-xs font-bold mb-2" style={{color:muted}}>{lang==="fi"?"PERMA+4 ALUEET":"PERMA+4 AREAS"}</p>
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {CATS.map(c=>{
+            const isSel=selCats.some(s=>s.id===c.id);
+            return(<button key={c.id} type="button"
+              onClick={()=>setSelCats(isSel?selCats.filter(s=>s.id!==c.id):[...selCats,c])}
+              className="text-xs px-2 py-1 rounded-full font-semibold"
+              style={{background:isSel?c.color+"30":sub,color:isSel?c.color:muted,
+                border:`1px solid ${isSel?c.color:border}`}}>
+              {c.emoji} {c.label}
+            </button>);
+          })}
+        </div>
+        <div className="flex gap-2">
+          <button type="button" onClick={reset}
+            className="px-4 py-2.5 rounded-xl text-sm" style={{background:sub,color:muted}}>
+            {lang==="fi"?"Peruuta":"Cancel"}
+          </button>
+          <button type="button" onClick={saveInsight}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+            style={{background:saved?"#10B981":"#3B82F6",color:"#fff"}}>
+            {saved?(lang==="fi"?"Tallennettu!":"Saved!"):(editId?(lang==="fi"?"Päivitä":"Update"):(lang==="fi"?"Tallenna":"Save"))}
+          </button>
+        </div>
+      </div>}
+
+      {!userInsights.length&&!showAdd&&<div className="text-center py-10 rounded-2xl"
+        style={{background:sub,border:`1px dashed ${border}`}}>
+        <div className="text-3xl mb-2">✍️</div>
+        <p className="text-sm" style={{color:muted}}>
+          {lang==="fi"?"Ei omia oivalluksia vielä.":"No own insights yet."}
+        </p>
+      </div>}
+
+      {userInsights.filter(ins=>!filterCat||(ins.catIds||[ins.catId]).includes(filterCat)).map(ins=>{
+        const cats=(ins.catIds||[ins.catId]).filter(Boolean).map(id=>CATS.find(c=>c.id===id)).filter(Boolean);
+        return(<div key={ins.id} className="rounded-2xl p-4 mb-3"
+          style={{background:cats[0]?cats[0].color+"15":card,
+            border:`1px solid ${cats[0]?cats[0].color+"30":border}`}}>
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1 flex-wrap">
+              {cats.map(c=><span key={c.id}>{c.emoji}</span>)}
+            </div>
+            <div className="flex gap-1.5">
+              <button type="button" onClick={()=>startEdit(ins)}
+                className="text-xs px-2 py-1 rounded-lg" style={{background:sub,color:muted}}>
+                {lang==="fi"?"Muokkaa":"Edit"}
+              </button>
+              <button type="button" onClick={()=>deleteInsight(ins.id)}
+                className="text-xs px-2 py-1 rounded-lg" style={{background:"#EF444415",color:"#EF4444"}}>
+                {lang==="fi"?"Poista":"Delete"}
+              </button>
+            </div>
+          </div>
+          <p className="text-sm italic leading-relaxed" style={{color:text}}>"{ins.quote}"</p>
+          {ins.question&&<p className="text-xs mt-1" style={{color:muted}}>🤔 {ins.question}</p>}
+        </div>);
+      })}
+    </div>}
+
+    {/* Hidden tab */}
+    {libTab==="hidden"&&<div>
+      {!hiddenInsights.length&&<div className="text-center py-10 rounded-2xl"
+        style={{background:sub,border:`1px dashed ${border}`}}>
+        <p className="text-sm" style={{color:muted}}>
+          {lang==="fi"?"Ei piilotettuja oivalluksia.":"No hidden insights."}
+        </p>
+      </div>}
+      {hiddenInsights.map(q=>(
+        <div key={q} className="rounded-2xl p-4 mb-3"
+          style={{background:card,border:`1px solid ${border}`,opacity:0.7}}>
+          <p className="text-sm italic leading-relaxed mb-3" style={{color:text}}>
+            "{q.length>120?q.slice(0,120)+"...":q}"
+          </p>
+          <button type="button"
+            onClick={()=>onData({...data,hiddenInsights:hiddenInsights.filter(h=>h!==q)})}
+            className="text-xs px-3 py-1.5 rounded-xl font-semibold"
+            style={{background:"#10B98120",color:"#10B981"}}>
+            {lang==="fi"?"↩ Tuo takaisin":"↩ Restore"}
+          </button>
+        </div>
+      ))}
+    </div>}
   </div>);
 }
 
@@ -2862,7 +3151,7 @@ function DailyWelcomeView({dark, t, CATS, lang, userName, onContinue, data, onDa
 }
 
 // ── Home View ─────────────────────────────────────────────────────────────────
-function HomeView({data, onData, dark, t, CATS, lang, userName, onNavigate}) {
+function HomeView({data, onData, dark, t, CATS, lang, userName, onNavigate, highlight}) {
   const diary = data.diary || {};
   const today = todayStr();
   const todayEntry = diary[today];
@@ -2957,7 +3246,10 @@ function HomeView({data, onData, dark, t, CATS, lang, userName, onNavigate}) {
 
       return(
         <div className="rounded-2xl p-4 mb-4"
-          style={{background:active.catColor+"18",border:`1.5px solid ${active.catColor}40`}}>
+          style={{background:highlight?active.catColor+"30":active.catColor+"18",
+            border:`${highlight?"2.5px":"1.5px"} solid ${highlight?active.catColor:active.catColor+"40"}`,
+            transition:"all 0.5s ease",
+            boxShadow:highlight?`0 0 20px ${active.catColor}50`:"none"}}>
           {/* Header with nav */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -3176,6 +3468,13 @@ function SettingsView({dark,setDark,lang,setLang,reminderSettings,setReminderSet
     </Section>
 
     <Section title={t.sectionReminders}>
+      <Row label={t.showAppInsights} sub={t.showAppInsightsSub}
+        right={<button type="button" onClick={()=>{const s={...reminderSettings,showAppInsights:reminderSettings.showAppInsights===false?true:false};setReminderSettings(s);localStorage.setItem("perma_reminder",JSON.stringify(s));}}
+          className="w-12 h-6 rounded-full transition-all relative shrink-0"
+          style={{background:reminderSettings.showAppInsights!==false?"#3B82F6":dark?"#2D3F55":"#CBD5E1"}}>
+          <div className="w-5 h-5 rounded-full absolute top-0.5 transition-all"
+            style={{background:"#fff",left:reminderSettings.showAppInsights!==false?"calc(100% - 22px)":"2px"}}/>
+        </button>}/>
       <Row label={t.weekNumSetting} sub={t.weekNumSettingSub}
         right={<button type="button" onClick={()=>{const s={...reminderSettings,weekNumbers:reminderSettings.weekNumbers===false?true:false};setReminderSettings(s);localStorage.setItem("perma_reminder",JSON.stringify(s));}}
           className="w-12 h-6 rounded-full transition-all relative shrink-0"
@@ -3254,18 +3553,23 @@ function SettingsView({dark,setDark,lang,setLang,reminderSettings,setReminderSet
       </div>
     </Section>
 
-    <button type="button" onClick={()=>{localStorage.removeItem("lumen_onboarded");localStorage.removeItem("lumen_name");localStorage.removeItem("lumen_last_welcome");if(typeof window!=="undefined"&&window.location)window.location.reload();}}
-      className="w-full py-2 text-xs mb-2"
+    <button type="button" onClick={()=>{localStorage.removeItem("lumen_onboarded");localStorage.removeItem("lumen_name");localStorage.removeItem("lumen_last_welcome");setOnboarded(false);setUserName("");setShowDailyWelcome(false);}}
+      className="w-full py-2 text-xs mb-1"
       style={{color:muted}}>
       {lang==="fi"?"Nollaa onboarding (testaus)":"Reset onboarding (testing)"}
+    </button>
+    <button type="button" onClick={()=>{localStorage.removeItem("lumen_last_welcome");setShowDailyWelcome(true);}}
+      className="w-full py-2 text-xs mb-2"
+      style={{color:muted}}>
+      {lang==="fi"?"Näytä päivän tervehdys (testaus)":"Show daily welcome (testing)"}
     </button>
     <p className="text-xs text-center mt-2 mb-6" style={{color:muted,fontSize:"0.65rem"}}>Lumen Ascent · PERMA+4 · v1.0</p>
   </div>);
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({open,onClose,tab,setTab,dark,streak,t}){
-  const nav=[{id:"settings",icon:"⚙️",l:t.settings}];
+function Sidebar({open,onClose,tab,setTab,dark,streak,t,lang}){
+  const nav=[{id:"library",icon:"📚",l:lang==="fi"?"Kirjasto":"Library"},{id:"settings",icon:"⚙️",l:t.settings}];
   const bg=dark?"#1A2332":"#FFFFFF",border=dark?"#2D3F55":"#E8EEF4";
   const text=dark?"#E2E8F0":"#1E293B",muted="#94A3B8";
   return(<>
@@ -3369,7 +3673,20 @@ export default function App(){
   const [tab,setTab]=useState("home");
   const [prevTab,setPrevTab]=useState("home");
   const TABS_ORDER=["diary","calendar","home","stats","growth","settings"];
-  const setTabAnimated=(newTab)=>{setPrevTab(tab);setTab(newTab);};
+  const setTabAnimated=(newTab)=>{
+    setPrevTab(tab);
+    setTab(newTab);
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        window.scrollTo(0,0);
+        document.documentElement.scrollTop=0;
+        document.body.scrollTop=0;
+        if(mainRef?.current) mainRef.current.scrollTop=0;
+        const els=document.querySelectorAll('*');
+        els.forEach(el=>{if(el.scrollTop>0)el.scrollTop=0;});
+      });
+    });
+  };
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [onboarded,setOnboarded]=useState(()=>!!localStorage.getItem("lumen_onboarded"));
   const [userName,setUserName]=useState(()=>localStorage.getItem("lumen_name")||"");
@@ -3382,6 +3699,11 @@ export default function App(){
   const [confetti,setConfetti]=useState(false);
   const [showCrisis,setShowCrisis]=useState(false);
   const [modalOpen,setModalOpen]=useState(false);
+  const [highlightPlan,setHighlightPlan]=useState(false);
+  const mainRef=useRef(null);
+  const [toastMsg,setToastMsg]=useState("");
+  const [showToast,setShowToast]=useState(false);
+  const showToastMsg=(msg)=>{setToastMsg(msg);setShowToast(true);setTimeout(()=>setShowToast(false),2500);};
   const [calView,setCalView]=useState("week");
   const [jumpToDay,setJumpToDay]=useState(null);
   const crisisShownRef=useRef(false);
@@ -3440,7 +3762,7 @@ export default function App(){
   const tabIcons={home:"🏠",calendar:"📅",diary:"✍️",stats:"📊",growth:"🌱",settings:"⚙️"};
   const tabLabels={home:t.home,calendar:t.calendar,diary:t.diary,stats:t.stats,growth:t.growth,settings:t.settings};
 
-  return(<div className="min-h-screen" style={{"--bg-color":bg,background:bg,fontFamily:"'Inter',system-ui,sans-serif",color:text2}}>
+  return(<div ref={mainRef} className="min-h-screen" style={{"--bg-color":bg,background:bg,fontFamily:"'Inter',system-ui,sans-serif",color:text2}}>
     <style>{`
       *{box-sizing:border-box;}
       input[type=range]{-webkit-appearance:none;appearance:none;outline:none;}
@@ -3460,13 +3782,14 @@ export default function App(){
       .tab-enter-fade{animation:fadeIn 0.2s ease-out forwards}
     `}</style>
     <Confetti active={confetti}/>
+    <Toast message={toastMsg} visible={showToast} onDismiss={()=>setShowToast(false)}/>
     {!onboarded&&<OnboardingView dark={dark} t={t} CATS={CATS} onLang={(l)=>{setLang(l);localStorage.setItem("perma_lang",l);}} onComplete={(name)=>{localStorage.setItem("lumen_onboarded","1");if(name){localStorage.setItem("lumen_name",name);setUserName(name);}setOnboarded(true);setTab("home");}}/>}
     {onboarded&&showDailyWelcome&&<DailyWelcomeView dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} data={data} onData={handleData} onContinue={()=>{localStorage.setItem("lumen_last_welcome",new Date().toDateString());setShowDailyWelcome(false);setTab("home");}}/>}
     {showCrisis&&<CrisisModal dark={dark} t={t} onClose={()=>setShowCrisis(false)}/>}
 
     {/* Header + content only shown after onboarding and daily welcome */}
     {onboarded&&!showDailyWelcome&&<>
-    <Sidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} tab={tab} setTab={setTabAnimated} dark={dark} streak={streak} t={t}/>
+    <Sidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} tab={tab} setTab={setTabAnimated} dark={dark} streak={streak} t={t} lang={lang}/>
     {/* Header — top */}
     <div ref={headerRef} className="fixed top-0 left-0 right-0 z-30" style={{display:modalOpen?"none":"block"}} style={{background:headerBg,backdropFilter:"blur(14px)",borderBottom:`1px solid ${border}`}}>
       <div className="flex items-center justify-between px-4 max-w-md mx-auto" style={{paddingTop:"calc(0.4rem + env(safe-area-inset-top,0px))",paddingBottom:"0.4rem"}}>
@@ -3490,11 +3813,12 @@ export default function App(){
       overflowY:"auto", WebkitOverflowScrolling:"touch",
     }}>
       <div className="px-4 max-w-md mx-auto" style={{paddingTop:"1rem",paddingBottom:"1.5rem"}}>
-        {tab==="home"&&<HomeView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onNavigate={setTabAnimated}/>}
+        {tab==="home"&&<HomeView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang} userName={userName} onNavigate={setTabAnimated} highlight={highlightPlan}/>}
         {tab==="calendar"&&<CalendarView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} onModalChange={setModalOpen} lang={lang} calView={calView} setCalView={setCalView} timeGrid={reminderSettings.timeGrid!==false} weekNumbers={reminderSettings.weekNumbers!==false} jumpToDay={jumpToDay} onJumped={()=>setJumpToDay(null)}/>}
-        {tab==="diary"&&<DiaryView data={data} onData={handleData} dark={dark} onSaved={handleSaved} t={t} CATS={CATS} showInfoIcons={showInfoIcons}/>}
+        {tab==="diary"&&<DiaryView data={data} onData={handleData} dark={dark} onSaved={handleSaved} t={t} CATS={CATS} showInfoIcons={showInfoIcons} lang={lang} onNavigate={(tab,msg)=>{setTabAnimated(tab);if(tab==="home"){setHighlightPlan(true);setTimeout(()=>setHighlightPlan(false),2000);if(msg)showToastMsg(msg);}}}/>}
         {tab==="stats"&&<StatsView data={data} dark={dark} t={t} CATS={CATS} showInfoIcons={showInfoIcons} lang={lang} onNavigate={(day)=>{setCalView("week");setJumpToDay(day);setTabAnimated("calendar");}}/>}
-        {tab==="growth"&&<GrowthView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang}/>}
+        {tab==="growth"&&<GrowthView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang}/> }
+        {tab==="library"&&<LibraryView data={data} onData={handleData} dark={dark} t={t} CATS={CATS} lang={lang}/>}
         {tab==="settings"&&<SettingsView dark={dark} setDark={setDark} lang={lang} setLang={setLang} reminderSettings={reminderSettings} setReminderSettings={setReminderSettings} data={data} CATS={CATS} t={t} showInfoIcons={showInfoIcons} setShowInfoIcons={setShowInfoIcons}/>}
       </div>
     </div>
